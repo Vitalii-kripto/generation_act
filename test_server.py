@@ -1,0 +1,14 @@
+from fastapi import FastAPI
+import uvicorn
+import os
+
+app = FastAPI()
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "cwd": os.getcwd()}
+
+if __name__ == "__main__":
+    with open("python_started.txt", "w") as f:
+        f.write("Started")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
