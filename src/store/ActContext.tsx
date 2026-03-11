@@ -6,6 +6,7 @@ interface ActContextType {
   addAct: (act: Act) => void;
   updateAct: (id: string, act: Act) => void;
   deleteAct: (id: string) => void;
+  deleteAllActs: () => void;
   saveActToDb: (act: Act) => Promise<void>;
   downloadDocx: (act: Act) => Promise<void>;
   nextActNumber: number;
@@ -80,8 +81,43 @@ export function ActProvider({ children }: { children: ReactNode }) {
     setActs((prev) => prev.map((act) => act.id === id ? updatedAct : act));
   };
 
-  const deleteAct = (id: string) => {
-    setActs((prev) => prev.filter((act) => act.id !== id));
+  const deleteAct = async (id: string) => {
+    console.log('deleteAct called for id:', id);
+    try {
+      const response = await fetch(`/api/acts/${id}`, {
+        method: 'DELETE',
+      });
+      console.log('deleteAct response status:', response.status);
+      if (response.ok) {
+        setActs((prev) => prev.filter((act) => act.id !== id));
+      } else {
+        console.error('Delete error:', response.statusText);
+        alert('Ошибка при удалении акта из базы данных');
+      }
+    } catch (error) {
+      console.error('Failed to delete act:', error);
+      alert('Ошибка связи с сервером при удалении');
+    }
+  };
+
+  const deleteAllActs = async () => {
+    console.log('deleteAllActs called');
+    try {
+      const response = await fetch('/api/acts', {
+        method: 'DELETE',
+      });
+      console.log('deleteAllActs response status:', response.status);
+      if (response.ok) {
+        setActs([]);
+        setNextActNumberState(1);
+      } else {
+        console.error('Delete all error:', response.statusText);
+        alert('Ошибка при очистке реестра');
+      }
+    } catch (error) {
+      console.error('Failed to delete all acts:', error);
+      alert('Ошибка связи с сервером при удалении всех записей');
+    }
   };
 
   const saveActToDb = async (act: Act) => {
@@ -224,7 +260,8 @@ export function ActProvider({ children }: { children: ReactNode }) {
       nextActNumber, setNextActNumber,
       signatureImage, setSignatureImage,
       stampImage, setStampImage,
-      specification, setSpecification
+      specification, setSpecification,
+      deleteAllActs
     }}>
       {children}
     </ActContext.Provider>

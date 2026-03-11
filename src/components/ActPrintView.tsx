@@ -1,6 +1,7 @@
 import React from 'react';
 import { Act } from '../types';
 import { numberToWordsRu } from '../utils/numberToWords';
+import { normalizeDate } from '../utils/dateUtils';
 import { useActContext } from '../store/ActContext';
 import { Download, FileText } from 'lucide-react';
 // @ts-ignore
@@ -64,7 +65,7 @@ export function ActPrintView({ act, onBack }: ActPrintViewProps) {
             <div>
               <p>Дата составления и подписания</p>
               <p>Акта Поставщиком</p>
-              <p>{formatActDate(act.actDate)}</p>
+              <p>{normalizeDate(act.actDate)}</p>
             </div>
             <div>
               <p>Дата составления и подписания</p>
@@ -78,7 +79,7 @@ export function ActPrintView({ act, onBack }: ActPrintViewProps) {
           </p>
 
           <p className="indent-8 text-justify mb-4">
-            1. В соответствии с Договором № {act.contractNumber} от {formatActDate(act.contractDate)} (далее Договор) Поставщик выполнил обязательства по поставке товаров, а именно: поставка гидроизоляционных материалов.
+            1. В соответствии с Договором № {act.contractNumber} от {normalizeDate(act.contractDate)} (далее Договор) Поставщик выполнил обязательства по поставке товаров, а именно: поставка гидроизоляционных материалов.
           </p>
 
           <div className="indent-8 text-justify mb-4">
@@ -88,12 +89,12 @@ export function ActPrintView({ act, onBack }: ActPrintViewProps) {
                 {act.updDetails.map((d, i) => (
                   <span key={i}>
                     {i > 0 ? ', ' : ' '}
-                    № {d.number} от {formatActDate(d.date)}
+                    № {d.number} от {normalizeDate(d.date)}
                   </span>
                 ))}
               </span>
             ) : (
-              <span> № {act.updNumber} от {formatActDate(act.updDate)}</span>
+              <span> № {act.updNumber} от {normalizeDate(act.updDate)}</span>
             )}
           </div>
 
@@ -140,7 +141,7 @@ export function ActPrintView({ act, onBack }: ActPrintViewProps) {
           </p>
 
           <p className="indent-8 text-justify mb-4">
-            5. Фактический срок поставки: {formatActDate(act.actualDeliveryDate)}.
+            5. Фактический срок поставки: {normalizeDate(act.actualDeliveryDate)}.
           </p>
 
           <p className="indent-8 text-justify mb-4">
@@ -171,7 +172,7 @@ export function ActPrintView({ act, onBack }: ActPrintViewProps) {
               <p className="font-bold mb-4">{act.supplierShortName}</p>
               <div className="h-[60px] relative">
                 {stampImage && (
-                  <img src={stampImage} alt="Печать" className="absolute w-[180px] h-[180px] object-contain mix-blend-multiply pointer-events-none" style={{ top: '-60px', left: '-20px', zIndex: 0 }} />
+                  <img src={stampImage} alt="Печать" className="absolute w-[180px] h-[180px] object-contain mix-blend-multiply pointer-events-none" style={{ top: '40px', left: '-20px', zIndex: 0 }} />
                 )}
                 {signatureImage && (
                   <img src={signatureImage} alt="Подпись" className="absolute w-[220px] h-[120px] object-contain mix-blend-multiply pointer-events-none" style={{ top: '-40px', left: '20px', zIndex: 1 }} />
@@ -190,51 +191,4 @@ export function ActPrintView({ act, onBack }: ActPrintViewProps) {
       </div>
     </div>
   );
-}
-
-function getMonthName(monthStr: string) {
-  const months = [
-    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
-  ];
-  const m = parseInt(monthStr, 10);
-  if (m >= 1 && m <= 12) return months[m - 1];
-  return '';
-}
-
-function formatActDate(dateStr: string) {
-  if (!dateStr) return '«___» ____________ 20__ г.';
-  
-  const cleanStr = dateStr.replace(/\s*г\.?$/, '').trim();
-
-  // Parse DD.MM.YYYY
-  if (cleanStr.includes('.')) {
-    const parts = cleanStr.split('.');
-    if (parts.length === 3) {
-      const day = parts[0].padStart(2, '0');
-      return `«${day}» ${getMonthName(parts[1])} ${parts[2]} г.`;
-    }
-  }
-
-  // Parse YYYY-MM-DD
-  if (cleanStr.includes('-')) {
-    const parts = cleanStr.split('-');
-    if (parts.length === 3 && parts[0].length === 4) {
-      const day = parts[2].padStart(2, '0');
-      return `«${day}» ${getMonthName(parts[1])} ${parts[0]} г.`;
-    }
-  }
-  
-  // Parse "DD month YYYY" or "«DD» month YYYY"
-  const match = cleanStr.match(/(\d{1,2})[»"']?\s+([а-яА-Яa-zA-Z]+)\s+(\d{4})/);
-  if (match) {
-    const day = match[1].padStart(2, '0');
-    const month = match[2].toLowerCase();
-    const year = match[3];
-    return `«${day}» ${month} ${year} г.`;
-  }
-  
-  // Fallback
-  const fallbackClean = cleanStr.replace(/[«»]/g, '');
-  return `«${fallbackClean}» г.`;
 }

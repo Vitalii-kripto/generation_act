@@ -32,6 +32,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("ActApp")
+logger.info("Logging to file initialized")
 
 app = FastAPI()
 
@@ -234,47 +235,48 @@ def format_date_ru(date_str: str) -> str:
     # Убираем лишние пробелы и "г."
     clean_str = date_str.replace("г.", "").replace("г", "").strip()
     
-    months = [
-        "января", "февраля", "марта", "апреля", "мая", "июня",
-        "июля", "августа", "сентября", "октября", "ноября", "декабря"
-    ]
-    
     try:
         # Пытаемся распарсить DD.MM.YYYY
         if "." in clean_str:
             parts = clean_str.split(".")
             if len(parts) == 3:
-                day = int(parts[0])
-                month = int(parts[1])
+                day = parts[0].zfill(2)
+                month = parts[1].zfill(2)
                 year = parts[2]
-                if 1 <= month <= 12:
-                    return f"«{day:02d}» {months[month-1]} {year} г."
+                if len(year) == 2:
+                    year = "20" + year
+                return f"{day}.{month}.{year}"
         
         # Пытаемся распарсить YYYY-MM-DD
         if "-" in clean_str:
             parts = clean_str.split("-")
             if len(parts) == 3 and len(parts[0]) == 4:
                 year = parts[0]
-                month = int(parts[1])
-                day = int(parts[2])
-                if 1 <= month <= 12:
-                    return f"«{day:02d}» {months[month-1]} {year} г."
-                    
-        # Если дата уже содержит название месяца
-        for m in months:
-            if m in clean_str.lower():
-                # Убираем кавычки если есть
-                clean_str = clean_str.replace("«", "").replace("»", "").strip()
-                # Извлекаем день, месяц, год
-                import re
-                match = re.search(r'(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})', clean_str)
-                if match:
-                    return f"«{int(match.group(1)):02d}» {match.group(2)} {match.group(3)} г."
-                return f"«{clean_str}» г."
+                month = parts[1].zfill(2)
+                day = parts[2].zfill(2)
+                return f"{day}.{month}.{year}"
+        
+        # Если это уже длинный формат или что-то еще, попробуем извлечь цифры
+        import re
+        match = re.search(r'(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})', clean_str)
+        if match:
+            day = match.group(1).zfill(2)
+            month_name = match.group(2).lower()
+            year = match.group(3)
+            
+            months_map = {
+                "января": "01", "февраля": "02", "марта": "03", "апреля": "04",
+                "мая": "05", "июня": "06", "июля": "07", "августа": "08",
+                "сентября": "09", "октября": "10", "ноября": "11", "декабря": "12"
+            }
+            
+            month = months_map.get(month_name, "01")
+            return f"{day}.{month}.{year}"
+
+        return clean_str
     except Exception as e:
         logger.warning(f"Failed to parse date '{date_str}': {e}")
-    
-    return f"«{clean_str}» г."
+        return clean_str
 
 def num_to_words_ru(n: float) -> str:
     # Простая реализация для примера
@@ -346,9 +348,9 @@ async def generate_docx_from_data(act_data: Act):
         def get_dict(obj):
             return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
 
-        act_dict = get_dict(act_data)
-        items = act_dict['items']
-        upd_details = act_dict.get('updDetails') or []
+        act = get_dict(act_data)
+        items = act['items']
+        upd_details = act.get('updDetails') or []
 
         doc = Document()
         
@@ -535,14 +537,14 @@ async def generate_docx_from_data(act_data: Act):
             if has_stamp:
                 try:
                     b64 = act['stampImage'].split("base64,")[1] if "base64," in act['stampImage'] else act['stampImage']
-                    p_img.add_run().add_picture(BytesIO(base64.b64decode(b64)), width=Inches(1.5))
+                    p_img.add_run().add_picture(BytesIO(base64.b64decode(b64)), width=Inches(2.2))
                 except Exception as e:
                     logger.error(f"Error adding stamp to docx: {e}")
                     
             if has_sig:
                 try:
                     b64 = act['signatureImage'].split("base64,")[1] if "base64," in act['signatureImage'] else act['signatureImage']
-                    p_img.add_run().add_picture(BytesIO(base64.b64decode(b64)), width=Inches(1.5))
+                    p_img.add_run().add_picture(BytesIO(base64.b64decode(b64)), width=Inches(2.0))
                 except Exception as e:
                     logger.error(f"Error adding signature to docx: {e}")
 
@@ -572,6 +574,39 @@ async def generate_docx_from_data(act_data: Act):
 @app.post("/api/acts/{act_id}/docx")
 async def download_docx(act_id: str, act: Act):
     return await generate_docx_from_data(act)
+
+@app.delete("/api/acts")
+async def delete_all_acts():
+    try:
+        logger.info("Deleting all acts from database")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM acts")
+            conn.commit()
+        logger.info("All acts deleted successfully")
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting all acts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/acts/{act_id}")
+async def delete_act(act_id: str):
+    try:
+        logger.info(f"Deleting act: {act_id}")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM acts WHERE id = ?", (act_id,))
+            conn.commit()
+            if cursor.rowcount == 0:
+                logger.warning(f"Act {act_id} not found for deletion")
+                raise HTTPException(status_code=404, detail="Act not found")
+        logger.info(f"Act {act_id} deleted successfully")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting act: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

@@ -4,7 +4,7 @@ import { Act } from '../types';
 import { FileText, Trash2, Printer, Edit, FileDown } from 'lucide-react';
 
 export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => void, onEditAct: (act: Act) => void }) {
-  const { acts, deleteAct, downloadDocx } = useActContext();
+  const { acts, deleteAct, downloadDocx, deleteAllActs } = useActContext();
 
   if (acts.length === 0) {
     return (
@@ -17,7 +17,17 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
   }
 
   return (
-    <div className="bg-white shadow-sm rounded-xl overflow-hidden">
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button
+          onClick={deleteAllActs}
+          className="inline-flex items-center px-3 py-1.5 border border-red-300 text-xs font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+        >
+          <Trash2 className="w-4 h-4 mr-1.5" />
+          Очистить реестр
+        </button>
+      </div>
+      <div className="bg-white shadow-sm rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -95,6 +105,7 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   );
 }

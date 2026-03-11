@@ -3,12 +3,20 @@ import { useActContext } from '../store/ActContext';
 import { Act, ActItem, SpecificationItem } from '../types';
 import { Plus, Trash2, Upload, Loader2, AlertTriangle } from 'lucide-react';
 import { extractDataFromUPD } from '../services/geminiService';
+import { normalizeDate } from '../utils/dateUtils';
 
 export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (act: Act) => void, initialAct?: Act, onUpdate?: (act: Act) => void }) {
-  const { nextActNumber, addAct, specification, saveActToDb } = useActContext();
+  const { nextActNumber, addAct, specification, saveActToDb, acts } = useActContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
+
+  // Extract unique values for autocomplete
+  const uniqueObjects = Array.from(new Set(acts.map(a => a.objectName).filter(Boolean)));
+  const uniqueCustomerReps = Array.from(new Set(acts.map(a => a.customerRep).filter(Boolean)));
+  const uniqueCustomerRepShorts = Array.from(new Set(acts.map(a => a.customerRepShort).filter(Boolean)));
+  const uniqueSupplierReps = Array.from(new Set(acts.map(a => a.supplierRep).filter(Boolean)));
+  const uniqueSupplierRepShorts = Array.from(new Set(acts.map(a => a.supplierRepShort).filter(Boolean)));
 
   const matchWithSpecification = (item: Partial<ActItem>, overrideName: boolean = false, strict: boolean = false): Partial<ActItem> | null => {
     if (!item.name || !specification.length) return strict ? null : item;
@@ -104,6 +112,13 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setAct(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    if (['actDate', 'contractDate', 'updDate', 'actualDeliveryDate'].includes(name)) {
+      setAct(prev => ({ ...prev, [name]: normalizeDate(value) }));
+    }
   };
 
   const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -257,12 +272,12 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
         return {
           ...prev,
           updNumber: updNumbers.join(', '),
-          updDate: updDates.join(', '),
-          updDetails: updDetails,
-          actDate: updDates[updDates.length - 1] || prev.actDate,
-          actualDeliveryDate: updDates[updDates.length - 1] || prev.actualDeliveryDate,
+          updDate: updDates.map(d => normalizeDate(d)).join(', '),
+          updDetails: updDetails.map(d => ({ ...d, date: normalizeDate(d.date) })),
+          actDate: normalizeDate(updDates[updDates.length - 1]) || prev.actDate,
+          actualDeliveryDate: normalizeDate(updDates[updDates.length - 1]) || prev.actualDeliveryDate,
           contractNumber: firstData.contractNumber || prev.contractNumber,
-          contractDate: firstData.contractDate || prev.contractDate,
+          contractDate: normalizeDate(firstData.contractDate) || prev.contractDate,
           supplierName: firstData.supplierName || prev.supplierName,
           supplierShortName: firstData.supplierShortName || prev.supplierShortName,
           customerName: firstData.customerName || prev.customerName,
@@ -338,7 +353,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Дата Акта</label>
-              <input type="text" name="actDate" value={act.actDate} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input type="text" name="actDate" value={act.actDate} onChange={handleChange} onBlur={handleBlur} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Номер Договора</label>
@@ -346,7 +361,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Дата Договора</label>
-              <input type="text" name="contractDate" value={act.contractDate} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input type="text" name="contractDate" value={act.contractDate} onChange={handleChange} onBlur={handleBlur} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Номер УПД</label>
@@ -354,7 +369,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Дата УПД</label>
-              <input type="text" name="updDate" value={act.updDate} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input type="text" name="updDate" value={act.updDate} onChange={handleChange} onBlur={handleBlur} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
             </div>
           </div>
         </div>
@@ -363,7 +378,18 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           <h3 className="text-lg font-semibold border-b pb-2">Дополнительно</h3>
           <div>
             <label className="block text-sm font-medium text-gray-700">Объект</label>
-            <input type="text" name="objectName" value={act.objectName} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+            <input 
+              type="text" 
+              name="objectName" 
+              value={act.objectName} 
+              onChange={handleChange} 
+              list="objects-list"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" 
+              required 
+            />
+            <datalist id="objects-list">
+              {uniqueObjects.map((obj, i) => <option key={i} value={obj} />)}
+            </datalist>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -372,7 +398,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Факт. срок</label>
-              <input type="text" name="actualDeliveryDate" value={act.actualDeliveryDate} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input type="text" name="actualDeliveryDate" value={act.actualDeliveryDate} onChange={handleChange} onBlur={handleBlur} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
             </div>
           </div>
           <div>
@@ -400,7 +426,18 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">В лице (должность, ФИО)</label>
-              <input type="text" name="customerRep" value={act.customerRep} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input 
+                type="text" 
+                name="customerRep" 
+                value={act.customerRep} 
+                onChange={handleChange} 
+                list="customer-reps-list"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" 
+                required 
+              />
+              <datalist id="customer-reps-list">
+                {uniqueCustomerReps.map((rep, i) => <option key={i} value={rep} />)}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Действует на основании</label>
@@ -408,7 +445,18 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Подписант (ФИО кратко)</label>
-              <input type="text" name="customerRepShort" value={act.customerRepShort} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input 
+                type="text" 
+                name="customerRepShort" 
+                value={act.customerRepShort} 
+                onChange={handleChange} 
+                list="customer-rep-shorts-list"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" 
+                required 
+              />
+              <datalist id="customer-rep-shorts-list">
+                {uniqueCustomerRepShorts.map((rep, i) => <option key={i} value={rep} />)}
+              </datalist>
             </div>
           </div>
         </div>
@@ -426,7 +474,18 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">В лице (должность, ФИО)</label>
-              <input type="text" name="supplierRep" value={act.supplierRep} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input 
+                type="text" 
+                name="supplierRep" 
+                value={act.supplierRep} 
+                onChange={handleChange} 
+                list="supplier-reps-list"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" 
+                required 
+              />
+              <datalist id="supplier-reps-list">
+                {uniqueSupplierReps.map((rep, i) => <option key={i} value={rep} />)}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Действует на основании</label>
@@ -434,7 +493,18 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Подписант (ФИО кратко)</label>
-              <input type="text" name="supplierRepShort" value={act.supplierRepShort} onChange={handleChange} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" required />
+              <input 
+                type="text" 
+                name="supplierRepShort" 
+                value={act.supplierRepShort} 
+                onChange={handleChange} 
+                list="supplier-rep-shorts-list"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border" 
+                required 
+              />
+              <datalist id="supplier-rep-shorts-list">
+                {uniqueSupplierRepShorts.map((rep, i) => <option key={i} value={rep} />)}
+              </datalist>
             </div>
           </div>
         </div>
