@@ -168,48 +168,59 @@ async def health_check():
 
 @app.get("/api/acts")
 async def get_acts():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM acts ORDER BY createdAt DESC")
-    rows = cursor.fetchall()
-    acts = []
-    for row in rows:
-        act = dict(row)
-        act['items'] = json.loads(act['items'])
-        if act.get('updDetails'):
-            act['updDetails'] = json.loads(act['updDetails'])
-        acts.append(act)
-    conn.close()
-    return acts
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM acts ORDER BY createdAt DESC")
+            rows = cursor.fetchall()
+            acts = []
+            for row in rows:
+                act = dict(row)
+                act['items'] = json.loads(act['items'])
+                if act.get('updDetails'):
+                    act['updDetails'] = json.loads(act['updDetails'])
+                acts.append(act)
+            return acts
+    except Exception as e:
+        logger.error(f"Error getting acts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/acts")
 async def save_act(act: Act):
     try:
         logger.info(f"Saving act: {act.actNumber} (ID: {act.id})")
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO acts (
-                id, actNumber, actDate, contractNumber, contractDate, updNumber, updDate,
-                objectName, deliveryTerm, actualDeliveryDate, expertise, penalty,
-                customerName, customerShortName, customerRep, customerBasis, customerRepShort,
-                supplierName, supplierShortName, supplierRep, supplierBasis, supplierRepShort,
-                totalAmount, vatRate, vatAmount, items, updDetails, signatureImage, stampImage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            act.id, act.actNumber, act.actDate, act.contractNumber, act.contractDate, act.updNumber, act.updDate,
-            act.objectName, act.deliveryTerm, act.actualDeliveryDate, act.expertise, act.penalty,
-            act.customerName, act.customerShortName, act.customerRep, act.customerBasis, act.customerRepShort,
-            act.supplierName, act.supplierShortName, act.supplierRep, act.supplierBasis, act.supplierRepShort,
-            act.totalAmount, act.vatRate, act.vatAmount, 
-            json.dumps([item.dict() for item in act.items]),
-            json.dumps([d.dict() for d in act.updDetails]) if act.updDetails else None,
-            act.signatureImage,
-            act.stampImage
-        ))
-        conn.commit()
-        conn.close()
+        
+        # Use model_dump() for Pydantic v2, fallback to dict() for v1
+        def get_dict(obj):
+            return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
+
+        items_json = json.dumps([get_dict(item) for item in act.items])
+        upd_details_json = json.dumps([get_dict(d) for d in act.updDetails]) if act.updDetails else None
+
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO acts (
+                    id, actNumber, actDate, contractNumber, contractDate, updNumber, updDate,
+                    objectName, deliveryTerm, actualDeliveryDate, expertise, penalty,
+                    customerName, customerShortName, customerRep, customerBasis, customerRepShort,
+                    supplierName, supplierShortName, supplierRep, supplierBasis, supplierRepShort,
+                    totalAmount, vatRate, vatAmount, items, updDetails, signatureImage, stampImage
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                act.id, act.actNumber, act.actDate, act.contractNumber, act.contractDate, act.updNumber, act.updDate,
+                act.objectName, act.deliveryTerm, act.actualDeliveryDate, act.expertise, act.penalty,
+                act.customerName, act.customerShortName, act.customerRep, act.customerBasis, act.customerRepShort,
+                act.supplierName, act.supplierShortName, act.supplierRep, act.supplierBasis, act.supplierRepShort,
+                act.totalAmount, act.vatRate, act.vatAmount, 
+                items_json,
+                upd_details_json,
+                act.signatureImage,
+                act.stampImage
+            ))
+            conn.commit()
+        
         logger.info(f"Act {act.actNumber} saved successfully")
         return {"success": True}
     except Exception as e:
@@ -331,9 +342,13 @@ def num_to_words_ru(n: float) -> str:
 async def generate_docx_from_data(act_data: Act):
     try:
         logger.info(f"Generating DOCX for act: {act_data.actNumber}")
-        act = act_data.dict()
-        items = act['items']
-        upd_details = act.get('updDetails') or []
+        # Use model_dump() for Pydantic v2, fallback to dict() for v1
+        def get_dict(obj):
+            return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
+
+        act_dict = get_dict(act_data)
+        items = act_dict['items']
+        upd_details = act_dict.get('updDetails') or []
 
         doc = Document()
         

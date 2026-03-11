@@ -20,15 +20,13 @@ Requirement already satisfied: sniffio>=1.1 in /usr/local/lib/python3.10/dist-pa
 Requirement already satisfied: exceptiongroup in /usr/local/lib/python3.10/dist-packages (from anyio<4.0.0,>=3.7.1->fastapi==0.104.1->-r requirements.txt (line 1)) (1.3.1)
 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
 Requirements installed successfully.
-2026-03-11 17:49:07,530 - ActApp - INFO - Application starting...
-2026-03-11 17:49:07,530 - ActApp - INFO - Initializing database...
-2026-03-11 17:49:07,530 - ActApp - INFO - Database initialized successfully
-INFO:     Started server process [5310]
+2026-03-11 21:25:18,290 - ActApp - INFO - Application starting...
+2026-03-11 21:25:18,290 - ActApp - INFO - Initializing database...
+2026-03-11 21:25:18,291 - ActApp - INFO - Database initialized successfully
+INFO:     Started server process [501]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-2026-03-11 19:04:59,314 - ActApp - INFO - Saving act: 999 (ID: 66e3f8e4-3464-4c8e-b210-5b0667479395)
-/app/applet/main.py:206: PydanticDeprecatedSince20: The `dict` method is deprecated; use `model_dump` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
-  json.dumps([item.dict() for item in act.items]),
-2026-03-11 19:04:59,316 - ActApp - INFO - Act 999 saved successfully
-INFO:     127.0.0.1:55692 - "POST /api/acts HTTP/1.1" 200 OK
+2026-03-11 21:25:25,101 - ActApp - INFO - Saving act: 999 (ID: d059633b-5951-494b-95e5-340be48698b9)
+2026-03-11 21:25:25,102 - ActApp - INFO - Act 999 saved successfully
+INFO:     127.0.0.1:33192 - "POST /api/acts HTTP/1.1" 200 OK
