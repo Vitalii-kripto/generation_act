@@ -248,10 +248,22 @@ def format_date_ru(date_str: str) -> str:
                 day = int(parts[2])
                 if 1 <= month <= 12:
                     return f"«{day:02d}» {months[month-1]} {year} г."
+                    
+        # Если дата уже содержит название месяца
+        for m in months:
+            if m in clean_str.lower():
+                # Убираем кавычки если есть
+                clean_str = clean_str.replace("«", "").replace("»", "").strip()
+                # Извлекаем день, месяц, год
+                import re
+                match = re.search(r'(\d{1,2})\s+([а-яА-Я]+)\s+(\d{4})', clean_str)
+                if match:
+                    return f"«{int(match.group(1)):02d}» {match.group(2)} {match.group(3)} г."
+                return f"«{clean_str}» г."
     except Exception as e:
         logger.warning(f"Failed to parse date '{date_str}': {e}")
     
-    return f"«{date_str}» г."
+    return f"«{clean_str}» г."
 
 def num_to_words_ru(n: float) -> str:
     # Простая реализация для примера
@@ -353,12 +365,12 @@ async def generate_docx_from_data(act_data: Act):
         date_table.width = Inches(7.0)
         
         c1 = date_table.rows[0].cells[0].paragraphs[0]
-        c1.add_run("Дата составления и подписания\nАкта Поставщиком\n").bold = True
+        c1.add_run("Дата составления и подписания\nАкта Поставщиком\n").bold = False
         c1.add_run(format_date_ru(act['actDate']))
         c1.alignment = WD_ALIGN_PARAGRAPH.LEFT
         
         c2 = date_table.rows[0].cells[1].paragraphs[0]
-        c2.add_run("Дата составления и подписания\nАкта Заказчиком\n").bold = True
+        c2.add_run("Дата составления и подписания\nАкта Заказчиком\n").bold = False
         c2.add_run("«___» ____________ 2026 г.")
         c2.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
@@ -373,7 +385,7 @@ async def generate_docx_from_data(act_data: Act):
 
         # Пункты
         p1 = doc.add_paragraph()
-        p1.add_run(f"1. В соответствии с Договором № {act['contractNumber']} от {format_date_ru(act['contractDate'])} (далее Договор) Поставщик выполнил обязательства по поставке товаров, а именно: поставка гидроизоляционных материалов.")
+        p1.add_run(f"1. В соответствии с Договором № {act['contractNumber']} от {format_date_ru(act['contractDate'])} (далее Договор) Поставщик выполнил обязательства по поставке товаров, а именно: поставка гидроизоляционных материалов")
         p1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p1.paragraph_format.first_line_indent = Inches(0.5)
         
@@ -381,9 +393,9 @@ async def generate_docx_from_data(act_data: Act):
         p2 = doc.add_paragraph()
         upd_str = ""
         if upd_details and len(upd_details) > 0:
-            upd_str = ", ".join([f"№ {d['number']} от {format_date_ru(d['date'])}" for d in upd_details])
+            upd_str = ", ".join([f"{d['number']} от {format_date_ru(d['date'])}" for d in upd_details])
         else:
-            upd_str = f"№ {act['updNumber']} от {format_date_ru(act['updDate'])}"
+            upd_str = f"{act['updNumber']} от {format_date_ru(act['updDate'])}"
             
         p2.add_run(f"2. Фактически поставлено по заявке к Договору, что подтверждено соответствующими УПД: {upd_str}.")
         p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -398,8 +410,15 @@ async def generate_docx_from_data(act_data: Act):
         # Таблица
         table = doc.add_table(rows=1, cols=8)
         table.style = 'Table Grid'
+        
+        # Задаем ширину колонок
+        widths = [Inches(0.4), Inches(0.8), Inches(2.0), Inches(0.5), Inches(0.5), Inches(0.9), Inches(0.9), Inches(1.0)]
+        for row in table.rows:
+            for idx, width in enumerate(widths):
+                row.cells[idx].width = width
+
         hdr_cells = table.rows[0].cells
-        headers = ['№ п/п', '№ спец.', 'Наименование', 'Ед. изм.', 'Кол-во', 'Цена за ед. (руб.) в т.ч. НДС', 'Сумма (руб.) в т.ч. НДС', 'Страна']
+        headers = ['№\nп/п', '№, указанный в\nприложении №1 к Техн.\nзаданию\n(Спецификация)', 'Наименование\nтоварной позиции', 'Ед.\nизм.', 'Кол-\nво', 'Цена за ед.\n(руб.) в т.ч.\nНДС (при\nналичии)', 'Сумма (руб.)\nв т.ч. НДС\n(при\nналичии)', 'Страна\nпроисхождения']
         
         for i, h in enumerate(headers):
             hdr_cells[i].text = h
@@ -410,13 +429,15 @@ async def generate_docx_from_data(act_data: Act):
 
         for i, item in enumerate(items):
             row_cells = table.add_row().cells
+            for idx, width in enumerate(widths):
+                row_cells[idx].width = width
             row_cells[0].text = str(i + 1)
             row_cells[1].text = item.get('specNumber') or '-'
             row_cells[2].text = item['name']
             row_cells[3].text = item['unit']
-            row_cells[4].text = f"{item['quantity']:.3f}".rstrip('0').rstrip('.')
-            row_cells[5].text = f"{item['priceWithVat']:,.2f}".replace(',', ' ')
-            row_cells[6].text = f"{item['totalWithVat']:,.2f}".replace(',', ' ')
+            row_cells[4].text = f"{item['quantity']:.3f}".rstrip('0').rstrip('.').replace('.', ',')
+            row_cells[5].text = f"{item['priceWithVat']:,.2f}".replace(',', ' ').replace('.', ',')
+            row_cells[6].text = f"{item['totalWithVat']:,.2f}".replace(',', ' ').replace('.', ',')
             row_cells[7].text = item.get('country') or 'Россия'
             
             # Центрирование и шрифт
@@ -427,10 +448,12 @@ async def generate_docx_from_data(act_data: Act):
 
         # Итоговая строка
         footer_row = table.add_row().cells
+        for idx, width in enumerate(widths):
+            footer_row[idx].width = width
         footer_row[0].merge(footer_row[5])
-        footer_row[0].text = "Итого"
+        footer_row[0].text = "Итого:"
         footer_row[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        footer_row[6].text = f"{act['totalAmount']:,.2f}".replace(',', ' ')
+        footer_row[6].text = f"{act['totalAmount']:,.2f}".replace(',', ' ').replace('.', ',')
         footer_row[6].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         for cell in footer_row:
             for paragraph in cell.paragraphs:
@@ -452,7 +475,9 @@ async def generate_docx_from_data(act_data: Act):
         
         p6 = doc.add_paragraph()
         amount_words = num_to_words_ru(act['totalAmount'])
-        p6.add_run(f"6. Сумма, подлежащая уплате Поставщику за товар, принятый по настоящему Акту составляет {act['totalAmount']:,.2f} руб. ({amount_words}), в т.ч. НДС {act['vatRate']}% {act['vatAmount']:,.2f} руб.")
+        formatted_total = f"{act['totalAmount']:,.2f}".replace(',', ' ').replace('.', ',')
+        formatted_vat = f"{act['vatAmount']:,.2f}".replace(',', ' ').replace('.', ',')
+        p6.add_run(f"6. Сумма, подлежащая уплате Поставщику за товар, принятый по настоящему Акту, составляет {formatted_total} руб. ({amount_words}), в том числе НДС {act['vatRate']}% {formatted_vat} руб.")
         p6.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p6.paragraph_format.first_line_indent = Inches(0.5)
 
@@ -478,54 +503,38 @@ async def generate_docx_from_data(act_data: Act):
         
         # Заказчик
         p_cust = cells[0].paragraphs[0]
-        cust_rep_parts = act['customerRep'].split(' ')
-        cust_title = " ".join(cust_rep_parts[:3]) if len(cust_rep_parts) >= 3 else act['customerRep']
-        p_cust.add_run(f"{cust_title}\n{act['customerShortName']}\n\n\n_________________ / {act['customerRepShort']} /\nМ.П.")
+        p_cust.add_run(f"{act['customerName']} ({act['customerShortName']})\n\n\n________________ / {act['customerRepShort']} /\nМ.П.")
         
         # Поставщик
         p_supp = cells[1].paragraphs[0]
-        supp_rep_parts = act['supplierRep'].split(' ')
-        supp_title = " ".join(supp_rep_parts[:2]) if len(supp_rep_parts) >= 2 else act['supplierRep']
-        
-        # Добавляем текст поставщика
-        p_supp.add_run(f"{supp_title}\n{act['supplierShortName']}\n\n")
+        p_supp.add_run(f"{act['supplierName']} ({act['supplierShortName']})\n\n")
         
         # Вставка подписи и печати если есть
-        def add_image_to_cell(cell, base64_str, width_inches):
-            if not base64_str:
-                return False
-            try:
-                # Извлекаем чистый base64
-                if "base64," in base64_str:
-                    base64_str = base64_str.split("base64,")[1]
-                
-                img_data = base64.b64decode(base64_str)
-                img_stream = BytesIO(img_data)
-                
-                # Добавляем новый параграф для картинки
-                p = cell.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run()
-                run.add_picture(img_stream, width=Inches(width_inches))
-                return True
-            except Exception as e:
-                logger.error(f"Error adding image to docx: {e}")
-                return False
+        has_sig = bool(act.get('signatureImage'))
+        has_stamp = bool(act.get('stampImage'))
 
-        # Если есть подпись и печать, пробуем их добавить
-        has_sig = False
-        if act.get('signatureImage'):
-            has_sig = add_image_to_cell(cells[1], act['signatureImage'], 1.5)
-        
-        if not has_sig:
-            p_supp.add_run("\n\n_________________")
+        if has_stamp or has_sig:
+            p_img = cells[1].add_paragraph()
+            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
             
-        p_supp.add_run(f" / {act['supplierRepShort']} /\n")
-        
-        if act.get('stampImage'):
-            add_image_to_cell(cells[1], act['stampImage'], 1.8)
-        else:
-            p_supp.add_run("М.П.")
+            if has_stamp:
+                try:
+                    b64 = act['stampImage'].split("base64,")[1] if "base64," in act['stampImage'] else act['stampImage']
+                    p_img.add_run().add_picture(BytesIO(base64.b64decode(b64)), width=Inches(1.5))
+                except Exception as e:
+                    logger.error(f"Error adding stamp to docx: {e}")
+                    
+            if has_sig:
+                try:
+                    b64 = act['signatureImage'].split("base64,")[1] if "base64," in act['signatureImage'] else act['signatureImage']
+                    p_img.add_run().add_picture(BytesIO(base64.b64decode(b64)), width=Inches(1.5))
+                except Exception as e:
+                    logger.error(f"Error adding signature to docx: {e}")
+
+        p_supp_name = cells[1].add_paragraph()
+        p_supp_name.add_run("_________________")
+        p_supp_name.add_run(f" / {act['supplierRepShort']} /\n")
+        p_supp_name.add_run("М.П.")
 
         target_stream = BytesIO()
         doc.save(target_stream)
@@ -551,4 +560,4 @@ async def download_docx(act_id: str, act: Act):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

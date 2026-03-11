@@ -96,11 +96,17 @@ export function ActProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setActs(data);
       } else {
-        const errorData = await response.json();
-        const detail = typeof errorData.detail === 'string' 
-          ? errorData.detail 
-          : JSON.stringify(errorData.detail);
-        console.error('Save error details:', errorData);
+        console.error('Save error status:', response.status, response.statusText);
+        let detail = response.statusText;
+        try {
+          const errorData = await response.json();
+          detail = typeof errorData.detail === 'string' 
+            ? errorData.detail 
+            : JSON.stringify(errorData.detail);
+          console.error('Save error details:', errorData);
+        } catch (e) {
+          console.error('Failed to parse error response as JSON');
+        }
         alert(`Ошибка сохранения: ${detail || response.statusText}`);
       }
     } catch (error) {
@@ -147,7 +153,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
         const genResponse = await fetch('/api/generate-docx', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(act)
+          body: JSON.stringify(actWithImages)
         });
 
         if (genResponse.ok) {

@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node server.ts",
+    "dev": "python3 -u setup_python.py > python_output.txt 2>&1 && python3 kill_port.py && concurrently \"python3 -u main.py >> python_output.txt 2>&1\" \"vite --port=3000 --host=0.0.0.0\"",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
