@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "python3 -u setup_python.py > python_output.txt 2>&1 && python3 kill_port.py && concurrently \"python3 -u main.py >> python_output.txt 2>&1\" \"vite --port=3000 --host=0.0.0.0\"",
+    "dev": "python3 setup_python.py > python_output.txt 2>&1 && python3 kill_port.py && concurrently \"python3 main.py >> python_output.txt 2>&1\" \"vite --port=3000 --host=0.0.0.0\"",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
@@ -24,12 +24,10 @@
     "html2pdf.js": "^0.14.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
-    "node-fetch": "^2.7.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sqlite3": "^5.1.7",
     "tsx": "^4.21.0",
-    "uuid": "^13.0.0",
     "vite": "^6.2.0"
   },
   "devDependencies": {
