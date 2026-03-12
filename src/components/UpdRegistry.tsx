@@ -25,36 +25,56 @@ export function UpdRegistry() {
     });
   };
 
-  const [uploadProgress, setUploadProgress] = useState<{ current: number, total: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number, total: number, status: string } | null>(null);
+  const [uploadResults, setUploadResults] = useState<{ success: number, failed: string[] } | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setIsExtracting(true);
-    setUploadProgress({ current: 0, total: files.length });
+    setUploadProgress({ current: 0, total: files.length, status: 'Подготовка...' });
+    setUploadResults(null);
     
-    try {
-      let successCount = 0;
-      for (let i = 0; i < files.length; i++) {
-        setUploadProgress({ current: i + 1, total: files.length });
-        const file = files[i];
-        
-        // Small delay between files to avoid overwhelming the API
-        if (i > 0) await new Promise(resolve => setTimeout(resolve, 500));
+    const failed: string[] = [];
+    let successCount = 0;
 
-        const base64String = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-          reader.readAsDataURL(file);
-        });
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({ current: i + 1, total: files.length, status: `Обработка: ${file.name}` });
         
+        // Delay to avoid rate limits (1 second between files)
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
+
         try {
-          const data = await extractDataFromUPD(base64String, file.type);
+          const base64String = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+          
+          // Retry logic for AI extraction
+          let data = null;
+          let retries = 2;
+          while (retries >= 0) {
+            try {
+              data = await extractDataFromUPD(base64String, file.type);
+              break;
+            } catch (err) {
+              if (retries === 0) throw err;
+              retries--;
+              setUploadProgress(prev => prev ? { ...prev, status: `Повтор (${2-retries}/2): ${file.name}` } : null);
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }
+
+          if (!data) throw new Error("Не удалось извлечь данные");
           
           const updToSave = {
             id: crypto.randomUUID(),
-            updNumber: data.updNumber || '',
+            updNumber: data.updNumber || 'Б/Н',
             updDate: normalizeDate(data.updDate || ''),
             supplierName: data.supplierName || '',
             customerName: data.customerName || '',
@@ -80,25 +100,26 @@ export function UpdRegistry() {
             successCount++;
           } catch (err: any) {
             if (err.message.includes('уже существует')) {
-              const overwrite = await customConfirm(`УПД №${updToSave.updNumber} от ${updToSave.updDate} уже существует в реестре. Перезаписать?`);
+              const overwrite = await customConfirm(`УПД №${updToSave.updNumber} от ${updToSave.updDate} уже существует. Перезаписать?`);
               if (overwrite) {
                 await createUpd(updToSave, true);
                 successCount++;
+              } else {
+                // User skipped, not a failure but not a success either
               }
             } else {
-              console.error("Failed to save UPD to registry:", err);
+              throw err;
             }
           }
         } catch (err) {
-          console.error(`Error extracting from file ${file.name}:`, err);
+          console.error(`Error processing file ${file.name}:`, err);
+          failed.push(`${file.name}: ${err instanceof Error ? err.message : 'Ошибка'}`);
         }
       }
 
-      if (successCount < files.length) {
-        console.warn(`Загружено ${successCount} из ${files.length} УПД`);
-      }
+      setUploadResults({ success: successCount, failed });
     } catch (err) {
-      console.error("Upload error:", err);
+      console.error("Critical upload error:", err);
     } finally {
       setIsExtracting(false);
       setUploadProgress(null);
@@ -202,6 +223,33 @@ export function UpdRegistry() {
         </div>
       )}
 
+      {uploadResults && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Результаты загрузки</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Успешно загружено: <span className="font-bold text-green-600">{uploadResults.success}</span>
+            </p>
+            {uploadResults.failed.length > 0 && (
+              <div className="mb-4">
+                <p className="text-sm font-medium text-red-600 mb-1">Ошибки ({uploadResults.failed.length}):</p>
+                <div className="max-h-40 overflow-y-auto bg-red-50 p-2 rounded text-xs text-red-700">
+                  {uploadResults.failed.map((f, i) => <div key={i} className="mb-1">• {f}</div>)}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button
+                onClick={() => setUploadResults(null)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="p-6 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-xl font-semibold text-gray-900 flex items-center">
           <FileText className="w-6 h-6 mr-2 text-blue-500" />
@@ -236,15 +284,20 @@ export function UpdRegistry() {
               <div className="flex flex-col items-center">
                 <Loader2 className="w-5 h-5 animate-spin" />
                 {uploadProgress && (
-                  <span className="text-[10px] mt-0.5">
-                    {uploadProgress.current}/{uploadProgress.total}
-                  </span>
+                  <div className="flex flex-col items-center mt-0.5">
+                    <span className="text-[10px] leading-none">
+                      {uploadProgress.current}/{uploadProgress.total}
+                    </span>
+                    <span className="text-[8px] leading-none mt-0.5 opacity-75 max-w-[100px] truncate">
+                      {uploadProgress.status}
+                    </span>
+                  </div>
                 )}
               </div>
             ) : (
               <Upload className="w-5 h-5 mr-2" />
             )}
-            {isExtracting ? 'Загрузка...' : 'Загрузить УПД'}
+            {isExtracting ? '' : 'Загрузить УПД'}
           </button>
           <button
             onClick={exportUpds}
