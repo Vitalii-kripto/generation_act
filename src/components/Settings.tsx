@@ -1,18 +1,22 @@
 import React, { useState, useRef } from 'react';
 import { useActContext } from '../store/ActContext';
-import { Upload, Trash2 } from 'lucide-react';
+import { Upload, Trash2, Download, Database } from 'lucide-react';
 import { SpecificationSettings } from './SpecificationSettings';
 
 export function Settings() {
   const { 
     nextActNumber, setNextActNumber,
     signatureImage, setSignatureImage,
-    stampImage, setStampImage
+    stampImage, setStampImage,
+    fetchUpds
   } = useActContext();
   const [localNumber, setLocalNumber] = useState(nextActNumber.toString());
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
   
   const signatureInputRef = useRef<HTMLInputElement>(null);
   const stampInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = () => {
     const num = parseInt(localNumber, 10);
@@ -30,6 +34,57 @@ export function Settings() {
       setter(reader.result as string);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleExportBackup = async () => {
+    try {
+      setIsBackingUp(true);
+      window.open('/api/backup/export', '_blank');
+    } catch (err) {
+      console.error("Backup error:", err);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!window.confirm("ВНИМАНИЕ: Загрузка резервной копии полностью заменит текущую базу данных. Все несохраненные данные будут потеряны. Продолжить?")) {
+      if (backupInputRef.current) backupInputRef.current.value = '';
+      return;
+    }
+
+    try {
+      setIsRestoring(true);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/backup/import', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to restore backup');
+      }
+
+      // Refresh data
+      await fetchUpds();
+      // We might need to refresh Acts too, but ActContext doesn't expose fetchActs directly in the interface I saw
+      // Actually, Registry component calls fetchActs on mount usually.
+      
+      alert("База данных успешно восстановлена!");
+      window.location.reload(); // Simplest way to ensure all contexts are fresh
+    } catch (err) {
+      console.error("Restore error:", err);
+      alert(`Ошибка при восстановлении: ${err instanceof Error ? err.message : 'Неизвестная ошибка'}`);
+    } finally {
+      setIsRestoring(false);
+      if (backupInputRef.current) backupInputRef.current.value = '';
+    }
   };
 
   return (
@@ -58,6 +113,39 @@ export function Settings() {
           <p className="mt-2 text-sm text-gray-500">
             Здесь вы можете задать номер, с которого начнется нумерация следующих создаваемых актов.
           </p>
+        </div>
+
+        <div className="border-t pt-6">
+          <h4 className="text-md font-medium text-gray-900 mb-4">Резервное копирование</h4>
+          <p className="text-sm text-gray-500 mb-4">
+            Вы можете скачать полную копию базы данных (УПД, Акты, спецификации) или восстановить данные из ранее созданной копии.
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <button
+              onClick={handleExportBackup}
+              disabled={isBackingUp}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4 mr-2 text-blue-500" />
+              Скачать резервную копию (.db)
+            </button>
+            
+            <input 
+              type="file" 
+              ref={backupInputRef}
+              onChange={handleImportBackup} 
+              accept=".db" 
+              className="hidden" 
+            />
+            <button
+              onClick={() => backupInputRef.current?.click()}
+              disabled={isRestoring}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              <Upload className="w-4 h-4 mr-2 text-green-500" />
+              {isRestoring ? 'Восстановление...' : 'Восстановить из файла'}
+            </button>
+          </div>
         </div>
 
         <div className="border-t pt-6">

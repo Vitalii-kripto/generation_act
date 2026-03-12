@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -1007,6 +1008,63 @@ async def delete_act(act_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting act: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/backup/export")
+async def export_backup():
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="Database file not found")
+    return FileResponse(
+        DB_PATH, 
+        filename=f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+        media_type="application/x-sqlite3"
+    )
+
+@app.post("/api/backup/import")
+async def import_backup(file: UploadFile = File(...)):
+    try:
+        # Save the uploaded file to a temporary location first
+        temp_path = f"{DB_PATH}.tmp"
+        with open(temp_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Verify it's a valid sqlite3 database
+        try:
+            conn = sqlite3.connect(temp_path)
+            conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            conn.close()
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise HTTPException(status_code=400, detail=f"Invalid database file: {str(e)}")
+        
+        # Replace the current database
+        bak_path = f"{DB_PATH}.bak"
+        if os.path.exists(DB_PATH):
+            # Rename existing to .bak
+            if os.path.exists(bak_path):
+                os.remove(bak_path)
+            os.rename(DB_PATH, bak_path)
+        
+        try:
+            os.rename(temp_path, DB_PATH)
+            # If everything went well, remove the backup
+            if os.path.exists(bak_path):
+                os.remove(bak_path)
+        except Exception as e:
+            # Restore from backup if rename failed
+            if os.path.exists(bak_path):
+                if os.path.exists(DB_PATH):
+                    os.remove(DB_PATH)
+                os.rename(bak_path, DB_PATH)
+            raise e
+            
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error importing backup: {e}", exc_info=True)
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
