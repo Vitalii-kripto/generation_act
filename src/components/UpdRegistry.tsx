@@ -72,6 +72,19 @@ export function UpdRegistry() {
 
           if (!data) throw new Error("Не удалось извлечь данные");
           
+          // Проверка покупателя
+          const customerName = (data.customerName || '').toLowerCase();
+          const customerShortName = (data.customerShortName || '').toLowerCase();
+          
+          const isValidCustomer = 
+            customerName.includes('тоннельстройкомплект') || 
+            customerName.includes('тск') ||
+            customerShortName.includes('тск');
+
+          if (!isValidCustomer) {
+            throw new Error(`Неверный покупатель: "${data.customerName || 'не определен'}". Должен быть АО "ТСК" или Акционерное общество «ТОННЕЛЬСТРОЙКОМПЛЕКТ»`);
+          }
+          
           const updToSave = {
             id: crypto.randomUUID(),
             updNumber: data.updNumber || 'Б/Н',
