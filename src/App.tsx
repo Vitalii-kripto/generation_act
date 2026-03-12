@@ -5,16 +5,18 @@
 
 import React, { useState } from 'react';
 import { ActProvider, useActContext } from './store/ActContext';
+import { UpdProvider } from './store/UpdContext';
 import { CreateAct } from './components/CreateAct';
 import { Registry } from './components/Registry';
+import { UpdRegistry } from './components/UpdRegistry';
 import { Settings } from './components/Settings';
 import { SpecificationSettings } from './components/SpecificationSettings';
 import { ActPrintView } from './components/ActPrintView';
-import { FileText, List, Settings as SettingsIcon } from 'lucide-react';
+import { FileText, List, Settings as SettingsIcon, Database } from 'lucide-react';
 import { Act } from './types';
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState<'create' | 'registry' | 'settings'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'registry' | 'updRegistry' | 'settings'>('create');
   const [viewingAct, setViewingAct] = useState<Act | null>(null);
   const [editingAct, setEditingAct] = useState<Act | null>(null);
   const { updateAct } = useActContext();
@@ -63,7 +65,18 @@ function AppContent() {
                 } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
               >
                 <List className="w-5 h-5 mr-2" />
-                Реестр
+                Реестр Актов
+              </button>
+              <button
+                onClick={() => { setActiveTab('updRegistry'); setEditingAct(null); }}
+                className={`${
+                  activeTab === 'updRegistry'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+              >
+                <Database className="w-5 h-5 mr-2" />
+                Реестр УПД
               </button>
               <button
                 onClick={() => { setActiveTab('settings'); setEditingAct(null); }}
@@ -101,6 +114,7 @@ function AppContent() {
               }}
             />
           )}
+          {activeTab === 'updRegistry' && <UpdRegistry />}
           {activeTab === 'settings' && <Settings />}
         </main>
       </div>
@@ -110,8 +124,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ActProvider>
-      <AppContent />
-    </ActProvider>
+    <UpdProvider>
+      <ActProvider>
+        <AppContent />
+      </ActProvider>
+    </UpdProvider>
   );
 }

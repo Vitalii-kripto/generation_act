@@ -14,7 +14,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from io import BytesIO
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+import holidays
+import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
 
 # Marker file to verify the script is running
 try:
@@ -96,6 +100,22 @@ def init_db():
                 createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS upds (
+                id TEXT PRIMARY KEY,
+                updNumber TEXT,
+                updDate TEXT,
+                supplierName TEXT,
+                customerName TEXT,
+                items TEXT,
+                totalAmount REAL,
+                vatAmount REAL,
+                vatRate REAL,
+                source TEXT,
+                isUsedInAct BOOLEAN DEFAULT 0,
+                createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         # Миграция для существующих баз
         columns_to_add = [
             ("updDetails", "TEXT"),
@@ -109,6 +129,18 @@ def init_db():
             except sqlite3.OperationalError:
                 # Колонка уже существует
                 pass
+                
+        # Миграция для таблицы upds
+        upds_columns_to_add = [
+            ("isPaid", "BOOLEAN DEFAULT 0")
+        ]
+        for col_name, col_type in upds_columns_to_add:
+            try:
+                cursor.execute(f"ALTER TABLE upds ADD COLUMN {col_name} {col_type}")
+                logger.info(f"Added column {col_name} to upds table")
+            except sqlite3.OperationalError:
+                pass
+                
         conn.commit()
         conn.close()
         logger.info("Database initialized successfully")
@@ -163,9 +195,378 @@ class Act(BaseModel):
     signatureImage: Optional[str] = None
     stampImage: Optional[str] = None
 
+class UpdItem(BaseModel):
+    id: str
+    name: str
+    unit: str
+    quantity: float
+    priceWithVat: float
+    totalWithVat: float
+    country: Optional[str] = "Россия"
+    specNumber: Optional[str] = None
+
+class Upd(BaseModel):
+    id: str
+    updNumber: str
+    updDate: str
+    supplierName: str
+    customerName: str
+    items: List[UpdItem]
+    totalAmount: float
+    vatAmount: float
+    vatRate: float
+    source: Optional[str] = None
+    isUsedInAct: Optional[bool] = False
+    isPaid: Optional[bool] = False
+    createdAt: Optional[str] = None
+
+class UpdResponse(Upd):
+    acceptanceDate: str
+    paymentDate: str
+    daysUntilPayment: int
+    status: str
+
+ru_holidays = holidays.RU(years=range(2020, 2030))
+
+def is_working_day(dt: datetime) -> bool:
+    d = dt.date()
+    # 2026 specific holidays and shifts (Russian Production Calendar)
+    if d.year == 2026:
+        # Jan 1-9: New Year holidays (Jan 1-8) + shift from Jan 3 (Jan 9)
+        if d.month == 1 and 1 <= d.day <= 9: return False
+        # Feb 23: Defender of the Fatherland Day
+        if d.month == 2 and d.day == 23: return False
+        # Mar 8, 9: International Women's Day (Mar 8) + shift from Mar 8 (Mar 9)
+        if d.month == 3 and (d.day == 8 or d.day == 9): return False
+        # May 1: Spring and Labor Day
+        if d.month == 5 and d.day == 1: return False
+        # May 4: Shift from Jan 4
+        if d.month == 5 and d.day == 4: return False
+        # May 9, 11: Victory Day (May 9) + shift from May 9 (May 11)
+        if d.month == 5 and (d.day == 9 or d.day == 11): return False
+        # June 12: Russia Day
+        if d.month == 6 and d.day == 12: return False
+        # Nov 4: Unity Day
+        if d.month == 11 and d.day == 4: return False
+        
+        # Standard weekends (no working Saturdays in 2026)
+        if dt.weekday() >= 5:
+            return False
+        return True
+        
+    # Fallback for other years
+    if dt.weekday() >= 5:
+        return False
+    if d in ru_holidays:
+        return False
+    return True
+
+def add_working_days(start_date: datetime, days_to_add: int) -> datetime:
+    current_date = start_date
+    added_days = 0
+    # Include start day if it's a working day
+    if is_working_day(current_date):
+        added_days = 1
+        
+    if added_days >= days_to_add:
+        return current_date
+        
+    while added_days < days_to_add:
+        current_date += timedelta(days=1)
+        if is_working_day(current_date):
+            added_days += 1
+    return current_date
+
+def get_working_days_between(start_date: datetime, end_date: datetime) -> int:
+    days = 0
+    current_date = start_date
+    
+    if start_date.date() == end_date.date():
+        return 1 if is_working_day(start_date) else 0
+        
+    if start_date < end_date:
+        step = 1
+    else:
+        step = -1
+        
+    # Include start day
+    if is_working_day(current_date):
+        days = 1 if step > 0 else -1
+        
+    while current_date.date() != end_date.date():
+        current_date += timedelta(days=step)
+        if is_working_day(current_date):
+            days += step
+    return days
+
+def parse_date(date_str: str) -> datetime:
+    try:
+        return datetime.strptime(date_str, "%d.%m.%Y")
+    except ValueError:
+        return datetime.now()
+
+def calculate_upd_dates(upd_date_str: str):
+    upd_date = parse_date(upd_date_str)
+    acceptance_date = add_working_days(upd_date, 50)
+    payment_date = add_working_days(acceptance_date, 7)
+    
+    today = datetime.now()
+    days_until_payment = get_working_days_between(today, payment_date)
+    
+    if days_until_payment > 3:
+        status = 'green'
+    elif days_until_payment >= 0:
+        status = 'yellow'
+    else:
+        status = 'red'
+        
+    return {
+        "acceptanceDate": acceptance_date.strftime("%d.%m.%Y"),
+        "paymentDate": payment_date.strftime("%d.%m.%Y"),
+        "daysUntilPayment": days_until_payment,
+        "status": status
+    }
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "backend": "python"}
+
+@app.get("/api/upds")
+async def get_upds():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM upds ORDER BY createdAt DESC")
+            rows = cursor.fetchall()
+            upds = []
+            for row in rows:
+                upd = dict(row)
+                upd['items'] = json.loads(upd['items'])
+                upd['isUsedInAct'] = bool(upd['isUsedInAct'])
+                upd['isPaid'] = bool(upd.get('isPaid', False))
+                dates_info = calculate_upd_dates(upd['updDate'])
+                upd.update(dates_info)
+                upds.append(upd)
+            return upds
+    except Exception as e:
+        logger.error(f"Error fetching upds: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/upds")
+async def create_upd(upd: Upd, overwrite: bool = False):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            
+            # Check uniqueness
+            cursor.execute("SELECT id FROM upds WHERE updNumber = ? AND updDate = ?", (upd.updNumber, upd.updDate))
+            existing = cursor.fetchone()
+            
+            if existing and not overwrite:
+                raise HTTPException(status_code=409, detail="УПД с таким номером и датой уже существует")
+            
+            if existing and overwrite:
+                cursor.execute("DELETE FROM upds WHERE id = ?", (existing[0],))
+                
+            cursor.execute('''
+                INSERT INTO upds (
+                    id, updNumber, updDate, supplierName, customerName, items,
+                    totalAmount, vatAmount, vatRate, source, isUsedInAct, isPaid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                upd.id, upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
+                json.dumps([item.dict() for item in upd.items]),
+                upd.totalAmount, upd.vatAmount, upd.vatRate, upd.source,
+                1 if upd.isUsedInAct else 0,
+                1 if upd.isPaid else 0
+            ))
+            conn.commit()
+            
+            dates_info = calculate_upd_dates(upd.updDate)
+            response_data = upd.dict()
+            response_data.update(dates_info)
+            return response_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating upd: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/upds/{id}")
+async def update_upd(id: str, upd: Upd):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE upds SET
+                    updNumber = ?, updDate = ?, supplierName = ?, customerName = ?,
+                    items = ?, totalAmount = ?, vatAmount = ?, vatRate = ?,
+                    source = ?, isUsedInAct = ?, isPaid = ?
+                WHERE id = ?
+            ''', (
+                upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
+                json.dumps([item.dict() for item in upd.items]),
+                upd.totalAmount, upd.vatAmount, upd.vatRate,
+                upd.source, 1 if upd.isUsedInAct else 0,
+                1 if upd.isPaid else 0, id
+            ))
+            conn.commit()
+            
+            dates_info = calculate_upd_dates(upd.updDate)
+            response_data = upd.dict()
+            response_data.update(dates_info)
+            return response_data
+    except Exception as e:
+        logger.error(f"Error updating upd: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/upds/{id}")
+async def delete_upd(id: str):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM upds WHERE id = ?", (id,))
+            conn.commit()
+            return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error deleting upd: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+from fastapi.responses import FileResponse
+import tempfile
+import os
+
+@app.get("/api/upds/export")
+async def export_upds():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM upds")
+            rows = cursor.fetchall()
+            
+            # Convert to dict and sort in Python
+            upds_list = []
+            for row in rows:
+                upd = dict(row)
+                upd['isPaid'] = bool(upd.get('isPaid', False))
+                upds_list.append(upd)
+                
+            def sort_key(u):
+                date_str = u.get('updDate', '')
+                try:
+                    parts = date_str.split('.')
+                    if len(parts) == 3:
+                        # YYYY-MM-DD for sorting
+                        date_val = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                    else:
+                        date_val = "0000-00-00"
+                except:
+                    date_val = "0000-00-00"
+                return (date_val, u.get('updNumber', ''))
+                
+            upds_list.sort(key=sort_key, reverse=False)
+            
+            # Calculate totals
+            total_amount = sum(u['totalAmount'] for u in upds_list)
+            paid_amount = sum(u['totalAmount'] for u in upds_list if u['isPaid'])
+            unpaid_amount = total_amount - paid_amount
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Реестр УПД"
+            
+            # Main Title
+            report_date = datetime.now().strftime("%d.%m.%Y %H:%M")
+            ws.merge_cells('A1:G1')
+            title_cell = ws.cell(row=1, column=1, value=f"Реестр УПД АО «ТСК» (отчет от {report_date})")
+            title_cell.font = Font(bold=True, size=14)
+            title_cell.alignment = Alignment(horizontal='center')
+
+            # Summary info (shifted down)
+            ws.cell(row=3, column=1, value="Общая сумма отгрузок:").font = Font(bold=True)
+            ws.cell(row=3, column=2, value=total_amount).number_format = '#,##0.00'
+            
+            ws.cell(row=4, column=1, value="Сумма оплаченных УПД:").font = Font(bold=True)
+            ws.cell(row=4, column=2, value=paid_amount).number_format = '#,##0.00'
+            
+            ws.cell(row=5, column=1, value="Сумма неоплаченных УПД:").font = Font(bold=True)
+            ws.cell(row=5, column=2, value=unpaid_amount).number_format = '#,##0.00'
+            
+            headers = ["Номер УПД", "Дата УПД", "Сумма документа", "Дата приемки", "Дата оплаты", "Статус сроков", "Статус оплаты"]
+            # Header row at Row 7
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=7, column=col_idx, value=header)
+                cell.font = Font(bold=True)
+            
+            green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            yellow_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+            red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+            
+            # Data starts at Row 8
+            for row_idx, upd in enumerate(upds_list, start=8):
+                dates_info = calculate_upd_dates(upd['updDate'])
+                
+                ws.cell(row=row_idx, column=1, value=upd['updNumber'])
+                ws.cell(row=row_idx, column=2, value=upd['updDate'])
+                
+                amount_cell = ws.cell(row=row_idx, column=3, value=upd['totalAmount'])
+                amount_cell.number_format = '#,##0.00'
+                
+                ws.cell(row=row_idx, column=4, value=dates_info['acceptanceDate'])
+                ws.cell(row=row_idx, column=5, value=dates_info['paymentDate'])
+                
+                status_cell = ws.cell(row=row_idx, column=6, value=dates_info['status'])
+                
+                if upd['isPaid']:
+                    status_cell.fill = green_fill
+                    status_cell.value = "Оплачено"
+                else:
+                    if dates_info['status'] == 'green':
+                        status_cell.fill = green_fill
+                        status_cell.value = "В срок"
+                    elif dates_info['status'] == 'yellow':
+                        status_cell.fill = yellow_fill
+                        status_cell.value = "Скоро"
+                    else:
+                        status_cell.fill = red_fill
+                        status_cell.value = "Просрочено"
+                        
+                paid_status_cell = ws.cell(row=row_idx, column=7, value="Оплачено" if upd['isPaid'] else "Не оплачено")
+                if upd['isPaid']:
+                    paid_status_cell.fill = green_fill
+                else:
+                    paid_status_cell.fill = red_fill
+            
+            # Auto-adjust column widths
+            for col in ws.columns:
+                max_length = 0
+                # Use a cell that is not merged to get the column letter safely
+                # Or use get_column_letter with the column index
+                column_idx = col[0].column
+                column_letter = get_column_letter(column_idx)
+                
+                for cell in col:
+                    # Skip merged cells for length calculation as they might span multiple columns
+                    if hasattr(cell, 'value') and cell.value:
+                        try:
+                            val_len = len(str(cell.value))
+                            if val_len > max_length:
+                                max_length = val_len
+                        except:
+                            pass
+                adjusted_width = (max_length + 2)
+                ws.column_dimensions[column_letter].width = adjusted_width
+                
+            fd, path = tempfile.mkstemp(suffix=".xlsx")
+            os.close(fd)
+            wb.save(path)
+            
+            return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename="upd_registry.xlsx")
+    except Exception as e:
+        logger.error(f"Error exporting upds: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/acts")
 async def get_acts():

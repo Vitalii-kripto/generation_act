@@ -27,6 +27,38 @@ export interface UpdDetail {
   amount: number;
 }
 
+export interface UpdItem {
+  id: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  priceWithVat: number;
+  totalWithVat: number;
+  country?: string;
+  specNumber?: string;
+}
+
+export interface UpdResponse {
+  id: string;
+  updNumber: string;
+  updDate: string;
+  supplierName: string;
+  customerName: string;
+  items: UpdItem[];
+  totalAmount: number;
+  vatAmount: number;
+  vatRate: number;
+  source?: string;
+  isUsedInAct?: boolean;
+  isPaid?: boolean;
+  createdAt?: string;
+  acceptanceDate: string;
+  paymentDate: string;
+  daysUntilPayment: number;
+  status: 'green' | 'yellow' | 'red';
+}
+
+
 export interface Act {
   id: string;
   actNumber: number;

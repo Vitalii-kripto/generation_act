@@ -1,15 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useActContext } from '../store/ActContext';
-import { Act, ActItem, SpecificationItem } from '../types';
-import { Plus, Trash2, Upload, Loader2, AlertTriangle } from 'lucide-react';
+import { useUpdContext } from '../store/UpdContext';
+import { Act, ActItem, SpecificationItem, UpdResponse } from '../types';
+import { Plus, Trash2, Upload, Loader2, AlertTriangle, Database, FileText } from 'lucide-react';
 import { extractDataFromUPD } from '../services/geminiService';
 import { normalizeDate } from '../utils/dateUtils';
 
 export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (act: Act) => void, initialAct?: Act, onUpdate?: (act: Act) => void }) {
   const { nextActNumber, addAct, specification, saveActToDb, acts } = useActContext();
+  const { createUpd, upds, updateUpd } = useUpdContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
+  const [showUpdSelector, setShowUpdSelector] = useState(false);
+  const [selectedUpdIds, setSelectedUpdIds] = useState<string[]>([]);
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string, resolve: (value: boolean) => void } | null>(null);
+
+  const customConfirm = (message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setConfirmDialog({ message, resolve });
+    });
+  };
 
   // Extract unique values for autocomplete
   const uniqueObjects = Array.from(new Set(acts.map(a => a.objectName).filter(Boolean)));
@@ -117,6 +128,10 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     if (['actDate', 'contractDate', 'updDate', 'actualDeliveryDate'].includes(name)) {
+      if ((name === 'actualDeliveryDate' || name === 'updDate') && value.includes(',')) {
+        // Do not normalize if it's a list of dates
+        return;
+      }
       setAct(prev => ({ ...prev, [name]: normalizeDate(value) }));
     }
   };
@@ -205,6 +220,45 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
         
         try {
           const data = await extractDataFromUPD(base64String, file.type);
+          
+          const updToSave = {
+            id: crypto.randomUUID(),
+            updNumber: data.updNumber || '',
+            updDate: normalizeDate(data.updDate || ''),
+            supplierName: data.supplierName || '',
+            customerName: data.customerName || '',
+            items: (data.items || []).map(item => ({
+              id: crypto.randomUUID(),
+              name: item.name || '',
+              unit: item.unit || 'шт',
+              quantity: item.quantity || 1,
+              priceWithVat: item.priceWithVat || 0,
+              totalWithVat: item.totalWithVat || 0,
+              country: item.country || 'Россия',
+              specNumber: null
+            })),
+            totalAmount: data.totalAmount || 0,
+            vatAmount: data.vatAmount || 0,
+            vatRate: data.vatRate || 20,
+            source: file.name,
+            isUsedInAct: true
+          };
+          
+          try {
+            await createUpd(updToSave);
+          } catch (err: any) {
+            if (err.message.includes('уже существует')) {
+              const overwrite = await customConfirm(`УПД №${updToSave.updNumber} от ${updToSave.updDate} уже существует в реестре. Перезаписать?`);
+              if (overwrite) {
+                await createUpd(updToSave, true);
+              } else {
+                continue; // Skip this file
+              }
+            } else {
+              console.error("Failed to save UPD to registry:", err);
+            }
+          }
+          
           allExtractedData.push(data);
         } catch (err) {
           console.error(`Error extracting from file ${file.name}:`, err);
@@ -216,34 +270,58 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
         return;
       }
 
-      setAct(prev => {
-        let aggregatedItems: ActItem[] = [];
-        let unmatchedNames: string[] = [];
-        let totalAmount = 0;
-        let vatAmount = 0;
-        let updNumbers: string[] = [];
-        let updDates: string[] = [];
-        let updDetails: { number: string; date: string; amount: number }[] = [];
+      await applySelectedUpds(allExtractedData as UpdResponse[]);
+      
+    } catch (err) {
+      console.error("Aggregation error:", err);
+      alert("Ошибка при обработке файлов.");
+    } finally {
+      setIsExtracting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
-        allExtractedData.forEach(data => {
-          const currentUpdNumber = data.updNumber || '';
-          const currentUpdDate = data.updDate || '';
-          const currentUpdAmount = data.totalAmount || 0;
+  const removeUpd = (indexToRemove: number) => {
+    setAct(prev => {
+      if (!prev.updDetails) return prev;
+      
+      const newUpdDetails = prev.updDetails.filter((_, i) => i !== indexToRemove);
+      
+      // If no UPDs left, clear items and amounts
+      if (newUpdDetails.length === 0) {
+        return {
+          ...prev,
+          updDetails: [],
+          updNumber: '',
+          updDate: '',
+          items: [],
+          totalAmount: 0,
+          vatAmount: 0
+        };
+      }
 
-          if (currentUpdNumber) updNumbers.push(currentUpdNumber);
-          if (currentUpdDate) updDates.push(currentUpdDate);
+      // Recalculate everything based on remaining UPDs
+      let aggregatedItems: ActItem[] = [];
+      let totalAmount = 0;
+      let vatAmount = 0;
+      let updNumbers: string[] = [];
+      let updDates: string[] = [];
+
+      newUpdDetails.forEach(detail => {
+        updNumbers.push(detail.number);
+        updDates.push(detail.date);
+        
+        // Find the full UPD data from registry
+        const fullUpd = upds.find(u => u.updNumber === detail.number && u.updDate === detail.date);
+        
+        if (fullUpd) {
+          totalAmount += fullUpd.totalAmount;
+          vatAmount += fullUpd.vatAmount;
           
-          updDetails.push({
-            number: currentUpdNumber,
-            date: currentUpdDate,
-            amount: currentUpdAmount
-          });
-
-          if (data.totalAmount) totalAmount += data.totalAmount;
-          if (data.vatAmount) vatAmount += data.vatAmount;
-
-          if (data.items?.length) {
-            for (const item of data.items) {
+          if (fullUpd.items?.length) {
+            for (const item of fullUpd.items) {
               const matched = matchWithSpecification({
                 id: crypto.randomUUID(),
                 name: item.name || '',
@@ -256,51 +334,221 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
               
               if (matched) {
                 aggregatedItems.push(matched as ActItem);
-              } else {
-                unmatchedNames.push(item.name || 'Неизвестная позиция');
               }
             }
           }
-        });
-
-        if (unmatchedNames.length > 0) {
-          setMatchError(`Не удалось найти следующие позиции в спецификации: ${Array.from(new Set(unmatchedNames)).join('; ')}`);
+        } else {
+          // If UPD not found in registry, we just keep the amount but can't reconstruct items easily
+          // This is a fallback, ideally all UPDs are in the registry
+          totalAmount += detail.amount;
+          vatAmount += detail.amount * 0.2; // Assuming 20% VAT as fallback
         }
-
-        const firstData = allExtractedData[0];
-
-        return {
-          ...prev,
-          updNumber: updNumbers.join(', '),
-          updDate: updDates.map(d => normalizeDate(d)).join(', '),
-          updDetails: updDetails.map(d => ({ ...d, date: normalizeDate(d.date) })),
-          actDate: normalizeDate(updDates[updDates.length - 1]) || prev.actDate,
-          actualDeliveryDate: normalizeDate(updDates[updDates.length - 1]) || prev.actualDeliveryDate,
-          contractNumber: firstData.contractNumber || prev.contractNumber,
-          contractDate: normalizeDate(firstData.contractDate) || prev.contractDate,
-          supplierName: firstData.supplierName || prev.supplierName,
-          supplierShortName: firstData.supplierShortName || prev.supplierShortName,
-          customerName: firstData.customerName || prev.customerName,
-          customerShortName: firstData.customerShortName || prev.customerShortName,
-          items: aggregatedItems.length > 0 ? aggregatedItems : prev.items,
-          totalAmount: totalAmount || prev.totalAmount,
-          vatAmount: vatAmount || prev.vatAmount,
-          vatRate: firstData.vatRate || prev.vatRate,
-        };
       });
-    } catch (err) {
-      console.error("Aggregation error:", err);
-      alert("Ошибка при обработке файлов.");
-    } finally {
-      setIsExtracting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+
+      return {
+        ...prev,
+        updDetails: newUpdDetails,
+        updNumber: updNumbers.join(', '),
+        updDate: updDates.join(', '),
+        actualDeliveryDate: Array.from(new Set(updDates.map(d => normalizeDate(d)))).join(', '),
+        items: aggregatedItems.length > 0 ? aggregatedItems : prev.items,
+        totalAmount,
+        vatAmount
+      };
+    });
+  };
+
+  const applySelectedUpds = async (selectedUpds: UpdResponse[]) => {
+    if (selectedUpds.length === 0) return;
+    
+    let aggregatedItems: ActItem[] = [...act.items];
+    let unmatchedNames: string[] = [];
+    let totalAmount = act.totalAmount || 0;
+    let vatAmount = act.vatAmount || 0;
+    let updNumbers: string[] = act.updNumber ? act.updNumber.split(', ').filter(Boolean) : [];
+    let updDates: string[] = act.updDate ? act.updDate.split(', ').filter(Boolean) : [];
+    let updDetails: { number: string; date: string; amount: number }[] = act.updDetails ? [...act.updDetails] : [];
+
+    // Clear default form values if this is the first UPD being added to a new act
+    if (!initialAct && updDetails.length === 0) {
+      aggregatedItems = [];
+      totalAmount = 0;
+      vatAmount = 0;
+      updNumbers = [];
+      updDates = [];
     }
+
+    selectedUpds.forEach(data => {
+      const currentUpdNumber = data.updNumber || '';
+      const currentUpdDate = data.updDate || '';
+      const currentUpdAmount = data.totalAmount || 0;
+
+      // Skip if already added
+      if (updDetails.some(d => d.number === currentUpdNumber && d.date === currentUpdDate)) {
+        return;
+      }
+
+      if (currentUpdNumber) updNumbers.push(currentUpdNumber);
+      if (currentUpdDate) updDates.push(currentUpdDate);
+      
+      updDetails.push({
+        number: currentUpdNumber,
+        date: currentUpdDate,
+        amount: currentUpdAmount
+      });
+
+      if (data.totalAmount) totalAmount += data.totalAmount;
+      if (data.vatAmount) vatAmount += data.vatAmount;
+
+      if (data.items?.length) {
+        for (const item of data.items) {
+          const matched = matchWithSpecification({
+            id: crypto.randomUUID(),
+            name: item.name || '',
+            unit: item.unit || 'шт',
+            quantity: item.quantity || 1,
+            priceWithVat: item.priceWithVat || 0,
+            totalWithVat: item.totalWithVat || 0,
+            country: item.country || 'Россия'
+          }, true, true);
+          
+          if (matched) {
+            aggregatedItems.push(matched as ActItem);
+          } else {
+            unmatchedNames.push(item.name || 'Неизвестная позиция');
+          }
+        }
+      }
+      
+      // Mark UPD as used in act
+      if (!data.isUsedInAct) {
+        updateUpd(data.id, { ...data, isUsedInAct: true }).catch(console.error);
+      }
+    });
+
+    if (unmatchedNames.length > 0) {
+      setMatchError(`Не удалось найти следующие позиции в спецификации: ${Array.from(new Set(unmatchedNames)).join('; ')}`);
+    }
+
+    const firstData = selectedUpds[0];
+
+    setAct(prev => ({
+      ...prev,
+      updNumber: updNumbers.join(', '),
+      updDate: updDates.map(d => normalizeDate(d)).join(', '),
+      updDetails: updDetails.map(d => ({ ...d, date: normalizeDate(d.date) })),
+      actDate: normalizeDate(updDates[updDates.length - 1]) || prev.actDate,
+      actualDeliveryDate: updDates.length > 0 ? Array.from(new Set(updDates.map(d => normalizeDate(d)))).join(', ') : prev.actualDeliveryDate,
+      supplierName: firstData.supplierName || prev.supplierName,
+      customerName: firstData.customerName || prev.customerName,
+      items: aggregatedItems.length > 0 ? aggregatedItems : prev.items,
+      totalAmount: totalAmount || prev.totalAmount,
+      vatAmount: vatAmount || prev.vatAmount,
+      vatRate: firstData.vatRate || prev.vatRate,
+    }));
+    
+    setShowUpdSelector(false);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8 bg-white p-6 rounded-xl shadow-sm">
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">{confirmDialog.message}</h3>
+            <div className="flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => { confirmDialog.resolve(false); setConfirmDialog(null); }}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => { confirmDialog.resolve(true); setConfirmDialog(null); }}
+                className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              >
+                Перезаписать
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {showUpdSelector && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-xl font-semibold text-gray-900">Выбрать УПД из реестра</h3>
+              <button type="button" onClick={() => { setShowUpdSelector(false); setSelectedUpdIds([]); }} className="text-gray-500 hover:text-gray-700">
+                &times;
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              {upds.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">Реестр УПД пуст</p>
+              ) : (
+                <div className="space-y-4">
+                  {upds.map(upd => {
+                    const isSelected = selectedUpdIds.includes(upd.id);
+                    const isAlreadyAdded = act.updDetails?.some(d => d.number === upd.updNumber && d.date === upd.updDate);
+                    return (
+                      <div key={upd.id} className={`flex items-center justify-between p-4 border rounded-lg transition-colors ${isSelected ? 'border-blue-500 bg-blue-50' : isAlreadyAdded ? 'border-gray-200 bg-gray-100 opacity-60' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={isAlreadyAdded}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedUpdIds(prev => [...prev, upd.id]);
+                              } else {
+                                setSelectedUpdIds(prev => prev.filter(id => id !== upd.id));
+                              }
+                            }}
+                            className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 mr-4 disabled:opacity-50"
+                          />
+                          <div>
+                            <p className="font-medium text-gray-900">УПД №{upd.updNumber} от {upd.updDate}</p>
+                            <p className="text-sm text-gray-500">{upd.supplierName}</p>
+                            <p className="text-sm font-medium mt-1">{upd.totalAmount.toLocaleString('ru-RU', { style: 'currency', currency: 'RUB' })}</p>
+                          </div>
+                        </div>
+                        {isAlreadyAdded && (
+                          <span className="text-xs font-medium text-gray-500 bg-gray-200 px-2 py-1 rounded">Уже добавлен</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => { setShowUpdSelector(false); setSelectedUpdIds([]); }}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const selected = upds.filter(u => selectedUpdIds.includes(u.id));
+                  applySelectedUpds(selected);
+                  setSelectedUpdIds([]);
+                }}
+                disabled={selectedUpdIds.length === 0}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Добавить выбранные ({selectedUpdIds.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-blue-50 p-6 rounded-lg border border-blue-100 flex flex-col items-center justify-center text-center">
         <h3 className="text-lg font-medium text-blue-900 mb-2">{initialAct ? 'Обновление данных из УПД' : 'Автоматическое заполнение из нескольких УПД'}</h3>
         <p className="text-sm text-blue-700 mb-4 max-w-md">Выберите один или несколько файлов УПД (PDF или изображения). Мы объединим все товары в один акт.</p>
@@ -312,25 +560,60 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           className="hidden" 
           multiple
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isExtracting}
-          className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isExtracting ? (
-            <>
-              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-              Распознавание...
-            </>
-          ) : (
-            <>
-              <Upload className="w-5 h-5 mr-2" />
-              Загрузить УПД
-            </>
-          )}
-        </button>
+        <div className="flex gap-4">
+          <button
+            type="button"
+            onClick={() => setShowUpdSelector(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
+            <Database className="w-5 h-5 mr-2" />
+            Выбрать из реестра
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isExtracting}
+            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isExtracting ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Распознавание...
+              </>
+            ) : (
+              <>
+                <Upload className="w-5 h-5 mr-2" />
+                Загрузить УПД
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {act.updDetails && act.updDetails.length > 0 && (
+        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+          <h4 className="text-sm font-medium text-gray-700 mb-3">Привязанные УПД:</h4>
+          <div className="space-y-2">
+            {act.updDetails.map((upd, index) => (
+              <div key={index} className="flex items-center justify-between bg-white p-3 rounded border border-gray-100 shadow-sm">
+                <div className="flex items-center">
+                  <FileText className="w-4 h-4 text-blue-500 mr-2" />
+                  <span className="text-sm font-medium text-gray-900">УПД №{upd.number} от {upd.date}</span>
+                  <span className="ml-4 text-sm text-gray-500">{upd.amount.toLocaleString('ru-RU', { style: 'currency', currency: 'RUB' })}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeUpd(index)}
+                  className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition-colors"
+                  title="Удалить УПД"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {matchError && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md flex items-start">
