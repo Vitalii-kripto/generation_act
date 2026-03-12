@@ -62,11 +62,29 @@ app.add_middleware(
 
 DB_PATH = "acts.db"
 
+class UsageLog(BaseModel):
+    model: str
+    prompt_tokens: int
+    candidates_tokens: int
+    total_tokens: int
+    action: str  # e.g., "upd_extraction", "spec_extraction"
+
 def init_db():
     try:
         logger.info("Initializing database...")
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS usage_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                candidates_tokens INTEGER,
+                total_tokens INTEGER,
+                action TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS acts (
                 id TEXT PRIMARY KEY,
@@ -331,6 +349,67 @@ def calculate_upd_dates(upd_date_str: str):
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "backend": "python"}
+
+@app.post("/api/usage")
+async def log_usage(log: UsageLog):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO usage_stats (model, prompt_tokens, candidates_tokens, total_tokens, action)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (log.model, log.prompt_tokens, log.candidates_tokens, log.total_tokens, log.action))
+            conn.commit()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error logging usage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/usage/stats")
+async def get_usage_stats():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Total stats
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as total_requests,
+                    SUM(prompt_tokens) as total_prompt_tokens,
+                    SUM(candidates_tokens) as total_candidates_tokens,
+                    SUM(total_tokens) as total_tokens
+                FROM usage_stats
+            ''')
+            overall = dict(cursor.fetchone())
+            
+            # Stats for today
+            today = datetime.now().strftime('%Y-%m-%d')
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as requests_today,
+                    SUM(total_tokens) as tokens_today
+                FROM usage_stats 
+                WHERE date(timestamp) = ?
+            ''', (today,))
+            daily = dict(cursor.fetchone())
+            
+            # Stats by action
+            cursor.execute('''
+                SELECT action, COUNT(*) as count, SUM(total_tokens) as tokens
+                FROM usage_stats
+                GROUP BY action
+            ''')
+            by_action = [dict(row) for row in cursor.fetchall()]
+            
+            return {
+                "overall": overall,
+                "daily": daily,
+                "by_action": by_action
+            }
+    except Exception as e:
+        logger.error(f"Error getting usage stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/upds")
 async def get_upds():

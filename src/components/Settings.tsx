@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useActContext } from '../store/ActContext';
-import { Upload, Trash2, Download, Database } from 'lucide-react';
+import { Upload, Trash2, Download, Database, AlertTriangle } from 'lucide-react';
 import { SpecificationSettings } from './SpecificationSettings';
 
 export function Settings() {
@@ -13,10 +13,31 @@ export function Settings() {
   const [localNumber, setLocalNumber] = useState(nextActNumber.toString());
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [usageStats, setUsageStats] = useState<any>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
   
   const signatureInputRef = useRef<HTMLInputElement>(null);
   const stampInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchUsageStats = async () => {
+    try {
+      setIsLoadingStats(true);
+      const response = await fetch('/api/usage/stats');
+      if (response.ok) {
+        const data = await response.json();
+        setUsageStats(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch usage stats:", err);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsageStats();
+  }, []);
 
   const handleSave = () => {
     const num = parseInt(localNumber, 10);
@@ -146,6 +167,76 @@ export function Settings() {
               {isRestoring ? 'Восстановление...' : 'Восстановить из файла'}
             </button>
           </div>
+        </div>
+
+        <div className="border-t pt-6">
+          <div className="flex justify-between items-center mb-4">
+            <h4 className="text-md font-medium text-gray-900">Статистика использования Gemini API</h4>
+            <button 
+              onClick={fetchUsageStats}
+              className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
+              disabled={isLoadingStats}
+            >
+              <Database className={`w-3 h-3 mr-1 ${isLoadingStats ? 'animate-spin' : ''}`} />
+              Обновить
+            </button>
+          </div>
+          
+          {usageStats ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                  <p className="text-[10px] text-blue-600 uppercase font-bold tracking-wider">Всего запросов</p>
+                  <p className="text-xl font-bold text-blue-900">{usageStats.overall.total_requests || 0}</p>
+                </div>
+                <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                  <p className="text-[10px] text-indigo-600 uppercase font-bold tracking-wider">Токенов сегодня</p>
+                  <p className="text-xl font-bold text-indigo-900">{usageStats.daily.tokens_today || 0}</p>
+                  <p className="text-[10px] text-indigo-500 mt-1">Лимит: 1M / мин</p>
+                </div>
+                <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                  <p className="text-[10px] text-green-600 uppercase font-bold tracking-wider">Запросов сегодня</p>
+                  <p className="text-xl font-bold text-green-900">{usageStats.daily.requests_today || 0}</p>
+                  <p className="text-[10px] text-green-500 mt-1">Лимит: 1500 / день</p>
+                </div>
+                <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+                  <p className="text-[10px] text-purple-600 uppercase font-bold tracking-wider">Всего токенов</p>
+                  <p className="text-xl font-bold text-purple-900">{(usageStats.overall.total_tokens / 1000).toFixed(1)}k</p>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h5 className="text-xs font-bold text-gray-500 uppercase mb-3 tracking-wider">По типам действий</h5>
+                <div className="space-y-2">
+                  {usageStats.by_action.map((action: any) => (
+                    <div key={action.action} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">
+                        {action.action === 'upd_extraction' ? 'Распознавание УПД' : 
+                         action.action === 'spec_extraction' ? 'Распознавание спецификаций' : action.action}
+                      </span>
+                      <div className="text-right">
+                        <span className="font-medium text-gray-900">{action.count} запр.</span>
+                        <span className="text-gray-400 mx-2">|</span>
+                        <span className="text-gray-600">{(action.tokens / 1000).toFixed(1)}k токенов</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {(usageStats.daily.requests_today > 1500 || usageStats.daily.tokens_today > 1000000) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-amber-800">Внимание: Превышение бесплатного порога</p>
+                    <p className="text-[10px] text-amber-700">Вы превысили стандартные лимиты бесплатного уровня (1500 запр/день). Убедитесь, что у вас настроен платный аккаунт или проверьте квоты в Google Cloud Console.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 italic">Загрузка статистики...</p>
+          )}
         </div>
 
         <div className="border-t pt-6">

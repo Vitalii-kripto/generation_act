@@ -40,6 +40,27 @@ export interface ExtractedUPDData {
   vatRate?: number;
 }
 
+async function logUsage(response: any, action: string) {
+  try {
+    const usage = response.usageMetadata;
+    if (!usage) return;
+
+    await fetch('/api/usage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: "gemini-3-flash-preview",
+        prompt_tokens: usage.promptTokenCount || 0,
+        candidates_tokens: usage.candidatesTokenCount || 0,
+        total_tokens: usage.totalTokenCount || 0,
+        action
+      })
+    });
+  } catch (e) {
+    console.error("Failed to log usage:", e);
+  }
+}
+
 export async function extractDataFromUPD(base64Data: string, mimeType: string): Promise<ExtractedUPDData> {
   const ai = getAI();
   const prompt = `
@@ -118,6 +139,8 @@ export async function extractDataFromUPD(base64Data: string, mimeType: string): 
     }
   });
 
+  await logUsage(response, "upd_extraction");
+
   if (!response.text) {
     throw new Error("Failed to extract data: Empty response from AI");
   }
@@ -184,6 +207,8 @@ export async function extractSpecificationFromPDF(base64Data: string, mimeType: 
       }
     }
   });
+
+  await logUsage(response, "spec_extraction");
 
   if (!response.text) {
     throw new Error("Failed to extract data: Empty response from AI");
