@@ -1,10 +1,52 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { useActContext } from '../store/ActContext';
 import { Act } from '../types';
-import { FileText, Trash2, Printer, Edit, FileDown } from 'lucide-react';
+import { FileText, Trash2, Printer, Edit, FileDown, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+
+type SortField = 'actNumber' | 'actDate' | 'totalAmount' | 'customerShortName';
+type SortDirection = 'asc' | 'desc';
 
 export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => void, onEditAct: (act: Act) => void }) {
   const { acts, deleteAct, downloadDocx, deleteAllActs } = useActContext();
+  const [sortField, setSortField] = useState<SortField>('actNumber');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const sortedActs = useMemo(() => {
+    return [...acts].sort((a, b) => {
+      let comparison = 0;
+      if (sortField === 'actNumber') {
+        comparison = a.actNumber - b.actNumber;
+      } else if (sortField === 'actDate') {
+        const parseDate = (dateStr: string) => {
+          const parts = dateStr.split('.');
+          if (parts.length === 3) {
+            return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
+          }
+          return new Date(dateStr).getTime();
+        };
+        comparison = parseDate(a.actDate) - parseDate(b.actDate);
+      } else if (sortField === 'totalAmount') {
+        comparison = a.totalAmount - b.totalAmount;
+      } else if (sortField === 'customerShortName') {
+        comparison = a.customerShortName.localeCompare(b.customerShortName);
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [acts, sortField, sortDirection]);
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-50" />;
+    return sortDirection === 'asc' ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />;
+  };
 
   if (acts.length === 0) {
     return (
@@ -32,23 +74,51 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                № Акта
+              <th 
+                scope="col" 
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                onClick={() => handleSort('actNumber')}
+              >
+                <div className="flex items-center">
+                  № Акта
+                  <SortIcon field="actNumber" />
+                </div>
               </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Дата
+              <th 
+                scope="col" 
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                onClick={() => handleSort('actDate')}
+              >
+                <div className="flex items-center">
+                  Дата
+                  <SortIcon field="actDate" />
+                </div>
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 УПД
               </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Заказчик
+              <th 
+                scope="col" 
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                onClick={() => handleSort('customerShortName')}
+              >
+                <div className="flex items-center">
+                  Заказчик
+                  <SortIcon field="customerShortName" />
+                </div>
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Объект
               </th>
-              <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Сумма (руб.)
+              <th 
+                scope="col" 
+                className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                onClick={() => handleSort('totalAmount')}
+              >
+                <div className="flex items-center justify-end">
+                  Сумма (руб.)
+                  <SortIcon field="totalAmount" />
+                </div>
               </th>
               <th scope="col" className="relative px-6 py-3">
                 <span className="sr-only">Действия</span>
@@ -56,7 +126,7 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {acts.map((act) => (
+            {sortedActs.map((act) => (
               <tr key={act.id} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                   {act.actNumber}
