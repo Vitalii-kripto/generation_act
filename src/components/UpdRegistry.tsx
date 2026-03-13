@@ -1,19 +1,33 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useUpdContext } from '../store/UpdContext';
-import { Download, Search, Trash2, CheckCircle, AlertTriangle, XCircle, FileText, Upload, Loader2 } from 'lucide-react';
+import { Download, Search, Trash2, CheckCircle, AlertTriangle, XCircle, FileText, Upload, Loader2, ChevronDown, ChevronUp, Paperclip } from 'lucide-react';
 import { UpdResponse } from '../types';
 import { extractDataFromUPD } from '../services/geminiService';
 import { normalizeDate } from '../utils/dateUtils';
+import { AttachmentsManager } from './AttachmentsManager';
 
 export function UpdRegistry() {
-  const { upds, loading, error, createUpd, deleteUpd, exportUpds, updateUpd } = useUpdContext();
+  const { upds, loading, error, createUpd, deleteUpd, exportUpds, updateUpd, fetchUpds } = useUpdContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<keyof UpdResponse>('updDate');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{ message: string, resolve: (value: boolean) => void } | null>(null);
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
 
   const totalAmount = useMemo(() => upds.reduce((sum, upd) => sum + upd.totalAmount, 0), [upds]);
   const paidAmount = useMemo(() => upds.filter(u => u.isPaid).reduce((sum, upd) => sum + upd.totalAmount, 0), [upds]);
@@ -366,6 +380,9 @@ export function UpdRegistry() {
                 Сумма
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Файлы
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Позиций
               </th>
               <th 
@@ -405,8 +422,9 @@ export function UpdRegistry() {
               </tr>
             ) : (
               filteredAndSortedUpds.map((upd) => (
-                <tr key={upd.id} className={`transition-colors ${getStatusRowClass(upd.status)}`}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                <React.Fragment key={upd.id}>
+                  <tr className={`transition-colors ${getStatusRowClass(upd.status)}`}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {upd.updNumber}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -414,6 +432,12 @@ export function UpdRegistry() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {upd.totalAmount.toLocaleString('ru-RU', { style: 'currency', currency: 'RUB' })}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <div className="flex items-center text-gray-500">
+                      <Paperclip className={`w-4 h-4 mr-1 ${upd.attachmentsCount && upd.attachmentsCount > 0 ? 'text-blue-500' : 'text-gray-300'}`} />
+                      <span>{upd.attachmentsCount || 0}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {upd.items.length}
@@ -463,6 +487,13 @@ export function UpdRegistry() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <button
+                      onClick={() => toggleRow(upd.id)}
+                      className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-full transition-colors mr-2"
+                      title={expandedRows.has(upd.id) ? "Скрыть детали" : "Показать детали"}
+                    >
+                      {expandedRows.has(upd.id) ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </button>
+                    <button
                       onClick={() => {
                         deleteUpd(upd.id).catch(err => {
                           console.error('Error deleting UPD:', err);
@@ -475,7 +506,19 @@ export function UpdRegistry() {
                     </button>
                   </td>
                 </tr>
-              ))
+                {expandedRows.has(upd.id) && (
+                  <tr>
+                    <td colSpan={11} className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                      <AttachmentsManager 
+                        entityType="upd" 
+                        entityId={upd.id} 
+                        onAttachmentsChange={fetchUpds}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))
             )}
           </tbody>
         </table>

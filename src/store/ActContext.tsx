@@ -3,10 +3,11 @@ import { Act, SpecificationItem } from '../types';
 
 interface ActContextType {
   acts: Act[];
+  fetchActs: () => Promise<void>;
   addAct: (act: Act) => void;
   updateAct: (id: string, act: Act) => void;
-  deleteAct: (id: string) => void;
-  deleteAllActs: () => void;
+  deleteAct: (id: string) => Promise<void>;
+  deleteAllActs: () => Promise<void>;
   saveActToDb: (act: Act) => Promise<void>;
   downloadDocx: (act: Act) => Promise<void>;
   nextActNumber: number;
@@ -45,18 +46,19 @@ export function ActProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem('stampImage');
   });
 
-  useEffect(() => {
-    const fetchActs = async () => {
-      try {
-        const response = await fetch('/api/acts');
-        if (response.ok) {
-          const data = await response.json();
-          setActs(data);
-        }
-      } catch (error) {
-        console.error('Failed to fetch acts from Python DB:', error);
+  const fetchActs = async () => {
+    try {
+      const response = await fetch('/api/acts');
+      if (response.ok) {
+        const data = await response.json();
+        setActs(data);
       }
-    };
+    } catch (error) {
+      console.error('Failed to fetch acts from Python DB:', error);
+    }
+  };
+
+  useEffect(() => {
     fetchActs();
   }, []);
 
@@ -256,7 +258,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
 
   return (
     <ActContext.Provider value={{ 
-      acts, addAct, updateAct, deleteAct, saveActToDb, downloadDocx,
+      acts, fetchActs, addAct, updateAct, deleteAct, saveActToDb, downloadDocx,
       nextActNumber, setNextActNumber,
       signatureImage, setSignatureImage,
       stampImage, setStampImage,

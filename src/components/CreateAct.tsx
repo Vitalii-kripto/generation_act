@@ -5,10 +5,11 @@ import { Act, ActItem, SpecificationItem, UpdResponse } from '../types';
 import { Plus, Trash2, Upload, Loader2, AlertTriangle, Database, FileText } from 'lucide-react';
 import { extractDataFromUPD } from '../services/geminiService';
 import { normalizeDate } from '../utils/dateUtils';
+import { AttachmentsManager } from './AttachmentsManager';
 
 export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (act: Act) => void, initialAct?: Act, onUpdate?: (act: Act) => void }) {
   const { nextActNumber, addAct, specification, saveActToDb, acts } = useActContext();
-  const { createUpd, upds, updateUpd } = useUpdContext();
+  const { createUpd, upds, fetchUpds } = useUpdContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
@@ -192,10 +193,12 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
     e.preventDefault();
     if (initialAct && onUpdate) {
       await saveActToDb(act);
+      await fetchUpds();
       onUpdate(act);
     } else if (onCreated) {
       addAct(act);
       await saveActToDb(act);
+      await fetchUpds();
       onCreated(act);
     }
   };
@@ -241,7 +244,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             vatAmount: data.vatAmount || 0,
             vatRate: data.vatRate || 20,
             source: file.name,
-            isUsedInAct: true
+            isUsedInAct: false
           };
           
           try {
@@ -418,11 +421,6 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             unmatchedNames.push(item.name || 'Неизвестная позиция');
           }
         }
-      }
-      
-      // Mark UPD as used in act
-      if (!data.isUsedInAct) {
-        updateUpd(data.id, { ...data, isUsedInAct: true }).catch(console.error);
       }
     });
 
@@ -878,6 +876,8 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           </div>
         </div>
       </div>
+
+      <AttachmentsManager entityType="act" entityId={act.id} />
 
       <div className="flex justify-end pt-6 border-t">
         <button type="submit" className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">

@@ -1,15 +1,31 @@
 import React, { useState, useMemo } from 'react';
 import { useActContext } from '../store/ActContext';
+import { useUpdContext } from '../store/UpdContext';
 import { Act } from '../types';
-import { FileText, Trash2, Printer, Edit, FileDown, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { FileText, Trash2, Printer, Edit, FileDown, ArrowUpDown, ChevronUp, ChevronDown, Paperclip } from 'lucide-react';
+import { AttachmentsManager } from './AttachmentsManager';
 
 type SortField = 'actNumber' | 'actDate' | 'totalAmount' | 'customerShortName';
 type SortDirection = 'asc' | 'desc';
 
 export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => void, onEditAct: (act: Act) => void }) {
-  const { acts, deleteAct, downloadDocx, deleteAllActs } = useActContext();
+  const { acts, deleteAct, downloadDocx, deleteAllActs, fetchActs } = useActContext();
+  const { fetchUpds } = useUpdContext();
   const [sortField, setSortField] = useState<SortField>('actNumber');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -18,6 +34,16 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
       setSortField(field);
       setSortDirection('desc');
     }
+  };
+
+  const handleDeleteAct = async (id: string) => {
+    await deleteAct(id);
+    await fetchUpds();
+  };
+
+  const handleDeleteAllActs = async () => {
+    await deleteAllActs();
+    await fetchUpds();
   };
 
   const sortedActs = useMemo(() => {
@@ -62,7 +88,7 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
     <div className="space-y-4">
       <div className="flex justify-end">
         <button
-          onClick={deleteAllActs}
+          onClick={handleDeleteAllActs}
           className="inline-flex items-center px-3 py-1.5 border border-red-300 text-xs font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
         >
           <Trash2 className="w-4 h-4 mr-1.5" />
@@ -110,6 +136,9 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Объект
               </th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Файлы
+              </th>
               <th 
                 scope="col" 
                 className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
@@ -127,56 +156,82 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {sortedActs.map((act) => (
-              <tr key={act.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {act.actNumber}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {act.actDate}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500 max-w-[150px] truncate" title={act.updNumber ? `№${act.updNumber} от ${act.updDate}` : 'Нет данных'}>
-                  {act.updNumber ? `№${act.updNumber}` : '-'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {act.customerShortName}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={act.objectName}>
-                  {act.objectName}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
-                  {act.totalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2 })}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button
-                    onClick={() => downloadDocx(act)}
-                    className="text-green-600 hover:text-green-900 mr-4"
-                    title="Скачать DOCX"
-                  >
-                    <FileDown className="w-5 h-5 inline" />
-                  </button>
-                  <button
-                    onClick={() => onEditAct(act)}
-                    className="text-indigo-600 hover:text-indigo-900 mr-4"
-                    title="Редактировать"
-                  >
-                    <Edit className="w-5 h-5 inline" />
-                  </button>
-                  <button
-                    onClick={() => onViewAct(act)}
-                    className="text-blue-600 hover:text-blue-900 mr-4"
-                    title="Просмотр и печать"
-                  >
-                    <Printer className="w-5 h-5 inline" />
-                  </button>
-                  <button
-                    onClick={() => deleteAct(act.id)}
-                    className="text-red-600 hover:text-red-900"
-                    title="Удалить"
-                  >
-                    <Trash2 className="w-5 h-5 inline" />
-                  </button>
-                </td>
-              </tr>
+              <React.Fragment key={act.id}>
+                <tr className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {act.actNumber}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {act.actDate}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-500 max-w-[150px] truncate" title={act.updNumber ? `№${act.updNumber} от ${act.updDate}` : 'Нет данных'}>
+                    {act.updNumber ? `№${act.updNumber}` : '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {act.customerShortName}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={act.objectName}>
+                    {act.objectName}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <div className="flex items-center text-gray-500">
+                      <Paperclip className={`w-4 h-4 mr-1 ${act.attachmentsCount && act.attachmentsCount > 0 ? 'text-blue-500' : 'text-gray-300'}`} />
+                      <span>{act.attachmentsCount || 0}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                    {act.totalAmount.toLocaleString('ru-RU', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <button
+                      onClick={() => toggleRow(act.id)}
+                      className="text-gray-500 hover:text-gray-700 mr-4"
+                      title={expandedRows.has(act.id) ? "Скрыть детали" : "Показать детали"}
+                    >
+                      {expandedRows.has(act.id) ? <ChevronUp className="w-5 h-5 inline" /> : <ChevronDown className="w-5 h-5 inline" />}
+                    </button>
+                    <button
+                      onClick={() => downloadDocx(act)}
+                      className="text-green-600 hover:text-green-900 mr-4"
+                      title="Скачать DOCX"
+                    >
+                      <FileDown className="w-5 h-5 inline" />
+                    </button>
+                    <button
+                      onClick={() => onEditAct(act)}
+                      className="text-indigo-600 hover:text-indigo-900 mr-4"
+                      title="Редактировать"
+                    >
+                      <Edit className="w-5 h-5 inline" />
+                    </button>
+                    <button
+                      onClick={() => onViewAct(act)}
+                      className="text-blue-600 hover:text-blue-900 mr-4"
+                      title="Просмотр и печать"
+                    >
+                      <Printer className="w-5 h-5 inline" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAct(act.id)}
+                      className="text-red-600 hover:text-red-900"
+                      title="Удалить"
+                    >
+                      <Trash2 className="w-5 h-5 inline" />
+                    </button>
+                  </td>
+                </tr>
+                {expandedRows.has(act.id) && (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                      <AttachmentsManager 
+                        entityType="act" 
+                        entityId={act.id} 
+                        onAttachmentsChange={fetchActs}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>

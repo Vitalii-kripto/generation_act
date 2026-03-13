@@ -1,3 +1,16 @@
+export interface Attachment {
+  id: string;
+  entityType: 'upd' | 'act';
+  entityId: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  uploadedAt: string;
+  uploadedBy?: string;
+  comment?: string;
+  data?: string; // Only present when downloading
+}
+
 export interface SpecificationItem {
   id: string;
   specNumber: string;
@@ -56,6 +69,7 @@ export interface UpdResponse {
   paymentDate: string;
   daysUntilPayment: number;
   status: 'green' | 'yellow' | 'red';
+  attachmentsCount?: number;
 }
 
 
@@ -89,4 +103,5 @@ export interface Act {
   penalty: string;
   signatureImage?: string | null;
   stampImage?: string | null;
+  attachmentsCount?: number;
 }

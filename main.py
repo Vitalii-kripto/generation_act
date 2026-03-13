@@ -135,7 +135,31 @@ def init_db():
                 createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # Миграция для существующих баз
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                entityType TEXT NOT NULL,
+                entityId TEXT NOT NULL,
+                fileName TEXT NOT NULL,
+                fileType TEXT NOT NULL,
+                fileSize INTEGER NOT NULL,
+                uploadedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                uploadedBy TEXT,
+                comment TEXT,
+                data TEXT NOT NULL
+            )
+        ''')
+        
+        # Миграция для вложений
+        cursor.execute("PRAGMA table_info(attachments)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'data' not in columns:
+            logger.info("Adding 'data' column to attachments table")
+            cursor.execute("ALTER TABLE attachments ADD COLUMN data TEXT")
+        else:
+            logger.info("'data' column already exists in attachments table")
+            
+        # Миграция для существующих баз (акты)
         columns_to_add = [
             ("updDetails", "TEXT"),
             ("signatureImage", "TEXT"),
@@ -213,6 +237,29 @@ class Act(BaseModel):
     items: List[ActItem]
     signatureImage: Optional[str] = None
     stampImage: Optional[str] = None
+    attachmentsCount: Optional[int] = 0
+
+class AttachmentCreate(BaseModel):
+    id: str
+    entityType: str
+    entityId: str
+    fileName: str
+    fileType: str
+    fileSize: int
+    uploadedBy: Optional[str] = None
+    comment: Optional[str] = None
+    data: str
+
+class Attachment(BaseModel):
+    id: str
+    entityType: str
+    entityId: str
+    fileName: str
+    fileType: str
+    fileSize: int
+    uploadedAt: Optional[str] = None
+    uploadedBy: Optional[str] = None
+    comment: Optional[str] = None
 
 class UpdItem(BaseModel):
     id: str
@@ -244,6 +291,7 @@ class UpdResponse(Upd):
     paymentDate: str
     daysUntilPayment: int
     status: str
+    attachmentsCount: Optional[int] = 0
 
 ru_holidays = holidays.RU(years=range(2020, 2030))
 
@@ -417,13 +465,43 @@ async def get_upds():
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM upds ORDER BY createdAt DESC")
+            
+            # Fetch all acts to determine which UPDs are used
+            cursor.execute("SELECT updNumber, updDate, updDetails FROM acts")
+            acts_data = cursor.fetchall()
+            used_upds = set()
+            for act_row in acts_data:
+                if act_row['updDetails']:
+                    try:
+                        details = json.loads(act_row['updDetails'])
+                        for d in details:
+                            if d.get('number') and d.get('date'):
+                                used_upds.add((d['number'], d['date']))
+                    except:
+                        pass
+                elif act_row['updNumber'] and act_row['updDate']:
+                    # Fallback for older acts without updDetails
+                    nums = [n.strip() for n in act_row['updNumber'].split(',')]
+                    dates = [d.strip() for d in act_row['updDate'].split(',')]
+                    for n, d in zip(nums, dates):
+                        used_upds.add((n, d))
+            
+            cursor.execute('''
+                SELECT u.*, 
+                       (SELECT COUNT(*) FROM attachments a WHERE a.entityType = 'upd' AND a.entityId = u.id) as attachmentsCount
+                FROM upds u 
+                ORDER BY u.createdAt DESC
+            ''')
             rows = cursor.fetchall()
             upds = []
             for row in rows:
                 upd = dict(row)
                 upd['items'] = json.loads(upd['items'])
-                upd['isUsedInAct'] = bool(upd['isUsedInAct'])
+                
+                # Dynamically calculate isUsedInAct
+                is_used = (upd['updNumber'], upd['updDate']) in used_upds
+                upd['isUsedInAct'] = is_used
+                
                 upd['isPaid'] = bool(upd.get('isPaid', False))
                 dates_info = calculate_upd_dates(upd['updDate'])
                 upd.update(dates_info)
@@ -506,11 +584,137 @@ async def delete_upd(id: str):
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+            cursor.execute("DELETE FROM attachments WHERE entityType = 'upd' AND entityId = ?", (id,))
             cursor.execute("DELETE FROM upds WHERE id = ?", (id,))
             conn.commit()
             return {"status": "success"}
     except Exception as e:
         logger.error(f"Error deleting upd: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/attachments")
+async def create_attachment(attachment: AttachmentCreate):
+    try:
+        data_len = len(attachment.data) if attachment.data else 0
+        logger.info(f"Creating attachment {attachment.fileName} for {attachment.entityType} {attachment.entityId}, data length: {data_len}")
+        
+        if not attachment.data or data_len < 10:
+            logger.warning(f"Received suspiciously small or empty data for attachment {attachment.fileName}")
+            
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO attachments (
+                    id, entityType, entityId, fileName, fileType, fileSize, uploadedBy, comment, data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                attachment.id, attachment.entityType, attachment.entityId, attachment.fileName,
+                attachment.fileType, attachment.fileSize, attachment.uploadedBy, attachment.comment, attachment.data
+            ))
+            conn.commit()
+            
+            # Verify the data was saved
+            cursor.execute("SELECT length(data) FROM attachments WHERE id = ?", (attachment.id,))
+            saved_row = cursor.fetchone()
+            saved_len = saved_row[0] if saved_row else 0
+            logger.info(f"Attachment {attachment.id} created successfully, verified saved data length: {saved_len}")
+            
+            return {"status": "success", "id": attachment.id}
+    except Exception as e:
+        logger.error(f"Error creating attachment: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/debug/attachments")
+async def debug_attachments():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, fileName, entityType, entityId, length(data) as data_len FROM attachments ORDER BY uploadedAt DESC LIMIT 10")
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/attachments/{id}/download")
+async def download_attachment(id: str):
+    try:
+        logger.info(f"Downloading attachment {id}")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT fileName, fileType, data FROM attachments WHERE id = ?", (id,))
+            row = cursor.fetchone()
+            if not row:
+                logger.warning(f"Attachment {id} not found")
+                raise HTTPException(status_code=404, detail="Attachment not found")
+            
+            file_name, file_type, data = row
+            
+            logger.info(f"Successfully fetched attachment {id}, data length: {len(data) if data else 0}")
+            
+            return {
+                "fileName": file_name,
+                "fileType": file_type,
+                "data": data
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading attachment: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/attachments/{entityType}/{entityId}")
+async def get_attachments(entityType: str, entityId: str):
+    try:
+        logger.info(f"Fetching attachments for {entityType} {entityId}")
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, entityType, entityId, fileName, fileType, fileSize, uploadedAt, uploadedBy, comment 
+                FROM attachments 
+                WHERE entityType = ? AND entityId = ?
+                ORDER BY uploadedAt DESC
+            ''', (entityType, entityId))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error fetching attachments: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/attachments/{id}")
+async def update_attachment(id: str, attachment: dict):
+    try:
+        logger.info(f"Updating attachment {id}")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            
+            # Only allow updating comment for now
+            if "comment" in attachment:
+                cursor.execute(
+                    "UPDATE attachments SET comment = ? WHERE id = ?",
+                    (attachment["comment"], id)
+                )
+            
+            conn.commit()
+            logger.info(f"Attachment {id} updated successfully")
+            return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error updating attachment: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/attachments/{id}")
+async def delete_attachment(id: str):
+    try:
+        logger.info(f"Deleting attachment {id}")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM attachments WHERE id = ?", (id,))
+            conn.commit()
+            logger.info(f"Attachment {id} deleted successfully")
+            return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error deleting attachment: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 from fastapi.responses import FileResponse
@@ -654,7 +858,12 @@ async def get_acts():
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM acts ORDER BY createdAt DESC")
+            cursor.execute('''
+                SELECT a.*, 
+                       (SELECT COUNT(*) FROM attachments att WHERE att.entityType = 'act' AND att.entityId = a.id) as attachmentsCount
+                FROM acts a 
+                ORDER BY a.createdAt DESC
+            ''')
             rows = cursor.fetchall()
             acts = []
             for row in rows:
@@ -1062,6 +1271,7 @@ async def delete_all_acts():
         logger.info("Deleting all acts from database")
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+            cursor.execute("DELETE FROM attachments WHERE entityType = 'act'")
             cursor.execute("DELETE FROM acts")
             conn.commit()
         logger.info("All acts deleted successfully")
@@ -1076,6 +1286,7 @@ async def delete_act(act_id: str):
         logger.info(f"Deleting act: {act_id}")
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+            cursor.execute("DELETE FROM attachments WHERE entityType = 'act' AND entityId = ?", (act_id,))
             cursor.execute("DELETE FROM acts WHERE id = ?", (act_id,))
             conn.commit()
             if cursor.rowcount == 0:
