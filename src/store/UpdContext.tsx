@@ -8,7 +8,7 @@ interface UpdContextType {
   fetchUpds: () => Promise<void>;
   createUpd: (upd: Omit<UpdResponse, 'acceptanceDate' | 'paymentDate' | 'daysUntilPayment' | 'status'>, overwrite?: boolean) => Promise<UpdResponse>;
   updateUpd: (id: string, upd: Omit<UpdResponse, 'acceptanceDate' | 'paymentDate' | 'daysUntilPayment' | 'status'>) => Promise<UpdResponse>;
-  deleteUpd: (id: string) => Promise<void>;
+  deleteUpd: (id: string) => Promise<UpdResponse | undefined>;
   exportUpds: () => void;
 }
 
@@ -80,9 +80,11 @@ export const UpdProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteUpd = async (id: string) => {
     try {
+      const updToDelete = upds.find(u => u.id === id);
       const response = await fetch(`/api/upds/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Failed to delete UPD');
       setUpds(prev => prev.filter(u => u.id !== id));
+      return updToDelete;
     } catch (err) {
       throw err;
     }

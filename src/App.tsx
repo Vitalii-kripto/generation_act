@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { ActProvider, useActContext } from './store/ActContext';
 import { UpdProvider } from './store/UpdContext';
+import { UndoProvider } from './store/UndoContext';
 import { CreateAct } from './components/CreateAct';
 import { Registry } from './components/Registry';
 import { UpdRegistry } from './components/UpdRegistry';
@@ -124,10 +125,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <UpdProvider>
-      <ActProvider>
-        <AppContent />
-      </ActProvider>
-    </UpdProvider>
+    <UndoProvider>
+      <UpdProvider>
+        <ActProvider>
+          <AppContent />
+        </ActProvider>
+      </UpdProvider>
+    </UndoProvider>
   );
 }

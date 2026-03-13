@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useUpdContext } from '../store/UpdContext';
-import { Download, Search, Trash2, CheckCircle, AlertTriangle, XCircle, FileText, Upload, Loader2, ChevronDown, ChevronUp, Paperclip } from 'lucide-react';
+import { useUndo } from '../store/UndoContext';
+import { Download, Search, Trash2, CheckCircle, AlertTriangle, XCircle, FileText, Upload, Loader2, ChevronDown, ChevronUp, Paperclip, AlertCircle } from 'lucide-react';
 import { UpdResponse } from '../types';
 import { extractDataFromUPD } from '../services/geminiService';
 import { normalizeDate } from '../utils/dateUtils';
@@ -8,10 +9,12 @@ import { AttachmentsManager } from './AttachmentsManager';
 
 export function UpdRegistry() {
   const { upds, loading, error, createUpd, deleteUpd, exportUpds, updateUpd, fetchUpds } = useUpdContext();
+  const { pushAction } = useUndo();
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<keyof UpdResponse>('updDate');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -123,14 +126,25 @@ export function UpdRegistry() {
           };
           
           try {
-            await createUpd(updToSave);
+            const createdUpd = await createUpd(updToSave);
             successCount++;
+            pushAction(`Загружен УПД №${createdUpd.updNumber}`, async () => {
+              await deleteUpd(createdUpd.id);
+            });
           } catch (err: any) {
             if (err.message.includes('уже существует')) {
               const overwrite = await customConfirm(`УПД №${updToSave.updNumber} от ${updToSave.updDate} уже существует. Перезаписать?`);
               if (overwrite) {
-                await createUpd(updToSave, true);
+                const oldUpd = upds.find(u => u.updNumber === updToSave.updNumber && u.updDate === updToSave.updDate);
+                const createdUpd = await createUpd(updToSave, true);
                 successCount++;
+                pushAction(`Перезаписан УПД №${createdUpd.updNumber}`, async () => {
+                  if (oldUpd) {
+                    await createUpd(oldUpd, true);
+                  } else {
+                    await deleteUpd(createdUpd.id);
+                  }
+                });
               } else {
                 // User skipped, not a failure but not a success either
               }
@@ -495,14 +509,33 @@ export function UpdRegistry() {
                     </button>
                     <button
                       onClick={() => {
-                        deleteUpd(upd.id).catch(err => {
-                          console.error('Error deleting UPD:', err);
-                        });
+                        if (confirmDelete === upd.id) {
+                          deleteUpd(upd.id).then((deletedUpd) => {
+                            if (deletedUpd) {
+                              pushAction(`Удален УПД №${deletedUpd.updNumber}`, async () => {
+                                await createUpd(deletedUpd);
+                              });
+                            }
+                          }).catch(err => {
+                            console.error('Error deleting UPD:', err);
+                          });
+                          setConfirmDelete(null);
+                        } else {
+                          setConfirmDelete(upd.id);
+                          setTimeout(() => setConfirmDelete(prev => prev === upd.id ? null : prev), 3000);
+                        }
                       }}
-                      className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-full transition-colors"
-                      title="Удалить УПД"
+                      className={`${confirmDelete === upd.id ? 'text-white bg-red-600 px-2 py-1 rounded animate-pulse' : 'text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-full transition-colors'}`}
+                      title={confirmDelete === upd.id ? "Нажмите еще раз для подтверждения" : "Удалить УПД"}
                     >
-                      <Trash2 className="w-5 h-5" />
+                      {confirmDelete === upd.id ? (
+                        <span className="flex items-center text-xs font-bold">
+                          <AlertCircle className="w-4 h-4 mr-1" />
+                          УДАЛИТЬ?
+                        </span>
+                      ) : (
+                        <Trash2 className="w-5 h-5" />
+                      )}
                     </button>
                   </td>
                 </tr>

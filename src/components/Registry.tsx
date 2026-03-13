@@ -1,19 +1,22 @@
 import React, { useState, useMemo } from 'react';
 import { useActContext } from '../store/ActContext';
 import { useUpdContext } from '../store/UpdContext';
+import { useUndo } from '../store/UndoContext';
 import { Act } from '../types';
-import { FileText, Trash2, Printer, Edit, FileDown, ArrowUpDown, ChevronUp, ChevronDown, Paperclip } from 'lucide-react';
+import { FileText, Trash2, Printer, Edit, FileDown, ArrowUpDown, ChevronUp, ChevronDown, Paperclip, AlertCircle } from 'lucide-react';
 import { AttachmentsManager } from './AttachmentsManager';
 
 type SortField = 'actNumber' | 'actDate' | 'totalAmount' | 'customerShortName';
 type SortDirection = 'asc' | 'desc';
 
 export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => void, onEditAct: (act: Act) => void }) {
-  const { acts, deleteAct, downloadDocx, deleteAllActs, fetchActs } = useActContext();
+  const { acts, deleteAct, downloadDocx, fetchActs, saveActToDb } = useActContext();
   const { fetchUpds } = useUpdContext();
+  const { pushAction } = useUndo();
   const [sortField, setSortField] = useState<SortField>('actNumber');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const toggleRow = (id: string) => {
     setExpandedRows(prev => {
@@ -36,14 +39,22 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
     }
   };
 
-  const handleDeleteAct = async (id: string) => {
-    await deleteAct(id);
-    await fetchUpds();
-  };
-
-  const handleDeleteAllActs = async () => {
-    await deleteAllActs();
-    await fetchUpds();
+  const handleDeleteAct = async (act: Act) => {
+    if (confirmDelete === act.id) {
+      await deleteAct(act.id);
+      await fetchUpds();
+      setConfirmDelete(null);
+      
+      // Push undo action
+      pushAction(`Удален Акт №${act.actNumber}`, async () => {
+        await saveActToDb(act);
+        await fetchUpds();
+      });
+    } else {
+      setConfirmDelete(act.id);
+      // Auto-cancel after 3 seconds
+      setTimeout(() => setConfirmDelete(prev => prev === act.id ? null : prev), 3000);
+    }
   };
 
   const sortedActs = useMemo(() => {
@@ -86,15 +97,6 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <button
-          onClick={handleDeleteAllActs}
-          className="inline-flex items-center px-3 py-1.5 border border-red-300 text-xs font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
-        >
-          <Trash2 className="w-4 h-4 mr-1.5" />
-          Очистить реестр
-        </button>
-      </div>
       <div className="bg-white shadow-sm rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
@@ -212,11 +214,18 @@ export function Registry({ onViewAct, onEditAct }: { onViewAct: (act: Act) => vo
                       <Printer className="w-5 h-5 inline" />
                     </button>
                     <button
-                      onClick={() => handleDeleteAct(act.id)}
-                      className="text-red-600 hover:text-red-900"
-                      title="Удалить"
+                      onClick={() => handleDeleteAct(act)}
+                      className={`${confirmDelete === act.id ? 'text-white bg-red-600 px-2 py-1 rounded animate-pulse' : 'text-red-600 hover:text-red-900'}`}
+                      title={confirmDelete === act.id ? "Нажмите еще раз для подтверждения" : "Удалить"}
                     >
-                      <Trash2 className="w-5 h-5 inline" />
+                      {confirmDelete === act.id ? (
+                        <span className="flex items-center text-xs font-bold">
+                          <AlertCircle className="w-4 h-4 mr-1" />
+                          УДАЛИТЬ?
+                        </span>
+                      ) : (
+                        <Trash2 className="w-5 h-5 inline" />
+                      )}
                     </button>
                   </td>
                 </tr>

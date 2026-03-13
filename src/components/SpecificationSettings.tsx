@@ -1,14 +1,17 @@
 import React, { useState, useRef } from 'react';
 import { useActContext } from '../store/ActContext';
+import { useUndo } from '../store/UndoContext';
 import { SpecificationItem } from '../types';
-import { Trash2, Plus, Upload, Loader2, Save } from 'lucide-react';
+import { Trash2, Plus, Upload, Loader2, Save, AlertCircle } from 'lucide-react';
 import { extractSpecificationFromPDF } from '../services/geminiService';
 
 export function SpecificationSettings() {
   const { specification, setSpecification } = useActContext();
+  const { pushAction } = useUndo();
   const [items, setItems] = useState<SpecificationItem[]>(specification);
   const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,12 +80,22 @@ export function SpecificationSettings() {
   };
 
   const removeItem = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
+    const itemToRemove = items.find(i => i.id === id);
+    if (itemToRemove) {
+      setItems(items.filter(item => item.id !== id));
+      pushAction(`Удалена позиция из спецификации: ${itemToRemove.name}`, async () => {
+        setItems(prev => [...prev, itemToRemove]);
+      });
+    }
   };
 
   const saveSpecification = () => {
+    const oldSpec = [...specification];
     setSpecification(items);
-    alert('Спецификация успешно сохранена!');
+    pushAction('Спецификация сохранена', async () => {
+      setSpecification(oldSpec);
+      setItems(oldSpec);
+    });
   };
 
   return (
@@ -200,10 +213,26 @@ export function SpecificationSettings() {
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-right text-sm font-medium">
                   <button
-                    onClick={() => removeItem(item.id)}
-                    className="text-red-600 hover:text-red-900"
+                    onClick={() => {
+                      if (confirmDelete === item.id) {
+                        removeItem(item.id);
+                        setConfirmDelete(null);
+                      } else {
+                        setConfirmDelete(item.id);
+                        setTimeout(() => setConfirmDelete(prev => prev === item.id ? null : prev), 3000);
+                      }
+                    }}
+                    className={`${confirmDelete === item.id ? 'text-white bg-red-600 px-2 py-1 rounded animate-pulse' : 'text-red-600 hover:text-red-900'}`}
+                    title={confirmDelete === item.id ? "Нажмите еще раз для подтверждения" : "Удалить позицию"}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {confirmDelete === item.id ? (
+                      <span className="flex items-center text-xs font-bold">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        УДАЛИТЬ?
+                      </span>
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </button>
                 </td>
               </tr>

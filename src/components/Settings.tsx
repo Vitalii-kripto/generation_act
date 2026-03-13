@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useActContext } from '../store/ActContext';
+import { useUndo } from '../store/UndoContext';
 import { Upload, Trash2, Download, Database, AlertTriangle } from 'lucide-react';
 import { SpecificationSettings } from './SpecificationSettings';
 
@@ -10,6 +11,7 @@ export function Settings() {
     stampImage, setStampImage,
     fetchUpds
   } = useActContext();
+  const { pushAction } = useUndo();
   const [localNumber, setLocalNumber] = useState(nextActNumber.toString());
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
@@ -42,17 +44,27 @@ export function Settings() {
   const handleSave = () => {
     const num = parseInt(localNumber, 10);
     if (!isNaN(num) && num > 0) {
+      const oldNum = nextActNumber;
       setNextActNumber(num);
+      pushAction(`Изменен номер следующего акта на ${num}`, async () => {
+        setNextActNumber(oldNum);
+        setLocalNumber(oldNum.toString());
+      });
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (img: string | null) => void) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (img: string | null) => void, type: 'подпись' | 'печать') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const oldImg = type === 'подпись' ? signatureImage : stampImage;
     const reader = new FileReader();
     reader.onloadend = () => {
-      setter(reader.result as string);
+      const result = reader.result as string;
+      setter(result);
+      pushAction(`Загружена ${type}`, async () => {
+        setter(oldImg);
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -254,7 +266,13 @@ export function Settings() {
                 <div className="relative w-full h-32 bg-gray-50 border border-dashed rounded-md flex items-center justify-center mb-4">
                   <img src={signatureImage} alt="Подпись" className="max-h-full max-w-full object-contain" />
                   <button 
-                    onClick={() => setSignatureImage(null)}
+                    onClick={() => {
+                      const oldImg = signatureImage;
+                      setSignatureImage(null);
+                      pushAction('Удалена подпись', async () => {
+                        setSignatureImage(oldImg);
+                      });
+                    }}
                     className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-sm text-red-600 hover:text-red-800"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -270,7 +288,7 @@ export function Settings() {
               <input 
                 type="file" 
                 ref={signatureInputRef}
-                onChange={(e) => handleImageUpload(e, setSignatureImage)} 
+                onChange={(e) => handleImageUpload(e, setSignatureImage, 'подпись')} 
                 accept="image/*" 
                 className="hidden" 
               />
@@ -290,7 +308,13 @@ export function Settings() {
                 <div className="relative w-full h-32 bg-gray-50 border border-dashed rounded-md flex items-center justify-center mb-4">
                   <img src={stampImage} alt="Печать" className="max-h-full max-w-full object-contain" />
                   <button 
-                    onClick={() => setStampImage(null)}
+                    onClick={() => {
+                      const oldImg = stampImage;
+                      setStampImage(null);
+                      pushAction('Удалена печать', async () => {
+                        setStampImage(oldImg);
+                      });
+                    }}
                     className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-sm text-red-600 hover:text-red-800"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -306,7 +330,7 @@ export function Settings() {
               <input 
                 type="file" 
                 ref={stampInputRef}
-                onChange={(e) => handleImageUpload(e, setStampImage)} 
+                onChange={(e) => handleImageUpload(e, setStampImage, 'печать')} 
                 accept="image/*" 
                 className="hidden" 
               />

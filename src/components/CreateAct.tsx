@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useActContext } from '../store/ActContext';
 import { useUpdContext } from '../store/UpdContext';
+import { useUndo } from '../store/UndoContext';
 import { Act, ActItem, SpecificationItem, UpdResponse } from '../types';
 import { Plus, Trash2, Upload, Loader2, AlertTriangle, Database, FileText } from 'lucide-react';
 import { extractDataFromUPD } from '../services/geminiService';
@@ -8,8 +9,9 @@ import { normalizeDate } from '../utils/dateUtils';
 import { AttachmentsManager } from './AttachmentsManager';
 
 export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (act: Act) => void, initialAct?: Act, onUpdate?: (act: Act) => void }) {
-  const { nextActNumber, addAct, specification, saveActToDb, acts } = useActContext();
+  const { nextActNumber, addAct, specification, saveActToDb, acts, deleteAct } = useActContext();
   const { createUpd, upds, fetchUpds } = useUpdContext();
+  const { pushAction } = useUndo();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
@@ -192,14 +194,22 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (initialAct && onUpdate) {
+      const oldAct = { ...initialAct };
       await saveActToDb(act);
       await fetchUpds();
       onUpdate(act);
+      pushAction(`Обновлен Акт №${act.actNumber}`, async () => {
+        await saveActToDb(oldAct);
+        onUpdate(oldAct);
+      });
     } else if (onCreated) {
       addAct(act);
       await saveActToDb(act);
       await fetchUpds();
       onCreated(act);
+      pushAction(`Создан Акт №${act.actNumber}`, async () => {
+        await deleteAct(act.id);
+      });
     }
   };
 
