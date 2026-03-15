@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useUpdContext } from '../store/UpdContext';
 import { useUndo } from '../store/UndoContext';
+import { useActContext } from '../store/ActContext';
 import { Download, Search, Trash2, CheckCircle, AlertTriangle, XCircle, FileText, Upload, Loader2, ChevronDown, ChevronUp, Paperclip, AlertCircle } from 'lucide-react';
 import { UpdResponse } from '../types';
 import { extractDataFromUPD } from '../services/geminiService';
@@ -9,6 +10,7 @@ import { AttachmentsManager } from './AttachmentsManager';
 
 export function UpdRegistry() {
   const { upds, loading, error, createUpd, deleteUpd, exportUpds, updateUpd, fetchUpds } = useUpdContext();
+  const { acts } = useActContext();
   const { pushAction } = useUndo();
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<keyof UpdResponse>('updDate');
@@ -179,8 +181,35 @@ export function UpdRegistry() {
     }
   };
 
+  const checkUpdUsedInOtherAct = (updNumber: string, updDate: string) => {
+    const cleanNumber = updNumber.trim();
+    const cleanDate = normalizeDate(updDate);
+    
+    for (const a of acts) {
+      if (a.updDetails && a.updDetails.length > 0) {
+        if (a.updDetails.some(d => d.number.trim() === cleanNumber && normalizeDate(d.date) === cleanDate)) {
+          return true;
+        }
+      } else if (a.updNumber && a.updDate) {
+        const numbers = a.updNumber.split(',').map(s => s.trim());
+        const dates = a.updDate.split(',').map(s => normalizeDate(s.trim()));
+        const count = Math.min(numbers.length, dates.length);
+        for (let i = 0; i < count; i++) {
+          if (numbers[i] === cleanNumber && dates[i] === cleanDate) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+
   const filteredAndSortedUpds = useMemo(() => {
     return upds
+      .map(upd => ({
+        ...upd,
+        isUsedInAct: checkUpdUsedInOtherAct(upd.updNumber, upd.updDate)
+      }))
       .filter(upd => {
         const searchLower = searchTerm.toLowerCase();
         return (
@@ -210,7 +239,7 @@ export function UpdRegistry() {
         if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [upds, searchTerm, sortField, sortDirection]);
+  }, [upds, searchTerm, sortField, sortDirection, acts]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

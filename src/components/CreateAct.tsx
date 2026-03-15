@@ -17,12 +17,36 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   const [matchError, setMatchError] = useState<string | null>(null);
   const [showUpdSelector, setShowUpdSelector] = useState(false);
   const [selectedUpdIds, setSelectedUpdIds] = useState<string[]>([]);
-  const [confirmDialog, setConfirmDialog] = useState<{ message: string, resolve: (value: boolean) => void } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string, resolve: (value: boolean) => void, isAlert?: boolean } | null>(null);
 
-  const customConfirm = (message: string): Promise<boolean> => {
+  const customConfirm = (message: string, isAlert: boolean = false): Promise<boolean> => {
     return new Promise((resolve) => {
-      setConfirmDialog({ message, resolve });
+      setConfirmDialog({ message, resolve, isAlert });
     });
+  };
+
+  const checkUpdUsedInOtherAct = (updNumber: string, updDate: string) => {
+    const cleanNumber = updNumber.trim();
+    const cleanDate = normalizeDate(updDate);
+    
+    for (const a of acts) {
+      if (initialAct && a.id === initialAct.id) continue;
+      if (a.updDetails && a.updDetails.length > 0) {
+        if (a.updDetails.some(d => d.number.trim() === cleanNumber && normalizeDate(d.date) === cleanDate)) {
+          return a.actNumber;
+        }
+      } else if (a.updNumber && a.updDate) {
+        const numbers = a.updNumber.split(',').map(s => s.trim());
+        const dates = a.updDate.split(',').map(s => normalizeDate(s.trim()));
+        const count = Math.min(numbers.length, dates.length);
+        for (let i = 0; i < count; i++) {
+          if (numbers[i] === cleanNumber && dates[i] === cleanDate) {
+            return a.actNumber;
+          }
+        }
+      }
+    }
+    return null;
   };
 
   // Extract unique values for autocomplete
@@ -193,6 +217,36 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Check if any UPD is already used
+    let hasConflict = false;
+    if (act.updDetails && act.updDetails.length > 0) {
+      for (const detail of act.updDetails) {
+        const usedInActNumber = checkUpdUsedInOtherAct(detail.number, detail.date);
+        if (usedInActNumber) {
+          await customConfirm(`УПД №${detail.number} от ${detail.date} уже используется в Акте №${usedInActNumber}. Один и тот же УПД не может использоваться в разных Актах одновременно.`, true);
+          hasConflict = true;
+          break;
+        }
+      }
+    } else if (act.updNumber && act.updDate) {
+      const numbers = act.updNumber.split(',').map(s => s.trim());
+      const dates = act.updDate.split(',').map(s => s.trim());
+      const count = Math.min(numbers.length, dates.length);
+      for (let i = 0; i < count; i++) {
+        const usedInActNumber = checkUpdUsedInOtherAct(numbers[i], dates[i]);
+        if (usedInActNumber) {
+          await customConfirm(`УПД №${numbers[i]} от ${dates[i]} уже используется в Акте №${usedInActNumber}. Один и тот же УПД не может использоваться в разных Актах одновременно.`, true);
+          hasConflict = true;
+          break;
+        }
+      }
+    }
+
+    if (hasConflict) {
+      return;
+    }
+
     if (initialAct && onUpdate) {
       const oldAct = { ...initialAct };
       await saveActToDb(act);
@@ -346,7 +400,13 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
               }, true, true);
               
               if (matched) {
-                aggregatedItems.push(matched as ActItem);
+                const existingItem = aggregatedItems.find(i => i.name === matched.name && i.priceWithVat === matched.priceWithVat);
+                if (existingItem) {
+                  existingItem.quantity += matched.quantity || 0;
+                  existingItem.totalWithVat += matched.totalWithVat || 0;
+                } else {
+                  aggregatedItems.push(matched as ActItem);
+                }
               }
             }
           }
@@ -374,7 +434,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   const applySelectedUpds = async (selectedUpds: UpdResponse[]) => {
     if (selectedUpds.length === 0) return;
     
-    let aggregatedItems: ActItem[] = [...act.items];
+    let aggregatedItems: ActItem[] = act.items.map(item => ({ ...item }));
     let unmatchedNames: string[] = [];
     let totalAmount = act.totalAmount || 0;
     let vatAmount = act.vatAmount || 0;
@@ -391,14 +451,21 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
       updDates = [];
     }
 
-    selectedUpds.forEach(data => {
+    for (const data of selectedUpds) {
       const currentUpdNumber = data.updNumber || '';
       const currentUpdDate = data.updDate || '';
       const currentUpdAmount = data.totalAmount || 0;
 
+      // Check if used in another act
+      const usedInActNumber = checkUpdUsedInOtherAct(currentUpdNumber, currentUpdDate);
+      if (usedInActNumber) {
+        await customConfirm(`УПД №${currentUpdNumber} от ${currentUpdDate} уже используется в Акте №${usedInActNumber}. Один и тот же УПД не может использоваться в разных Актах одновременно.`, true);
+        continue;
+      }
+
       // Skip if already added
       if (updDetails.some(d => d.number === currentUpdNumber && d.date === currentUpdDate)) {
-        return;
+        continue;
       }
 
       if (currentUpdNumber) updNumbers.push(currentUpdNumber);
@@ -426,13 +493,25 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           }, true, true);
           
           if (matched) {
-            aggregatedItems.push(matched as ActItem);
+            const existingItem = aggregatedItems.find(i => i.name === matched.name && i.priceWithVat === matched.priceWithVat);
+            if (existingItem) {
+              existingItem.quantity += matched.quantity || 0;
+              existingItem.totalWithVat += matched.totalWithVat || 0;
+            } else {
+              aggregatedItems.push(matched as ActItem);
+            }
           } else {
             unmatchedNames.push(item.name || 'Неизвестная позиция');
           }
         }
       }
-    });
+    }
+
+    if (updDetails.length === 0) {
+      // If no UPDs were added (e.g., all were skipped), don't update the act
+      setShowUpdSelector(false);
+      return;
+    }
 
     if (unmatchedNames.length > 0) {
       setMatchError(`Не удалось найти следующие позиции в спецификации: ${Array.from(new Set(unmatchedNames)).join('; ')}`);
@@ -465,19 +544,21 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
             <h3 className="text-lg font-medium text-gray-900 mb-4">{confirmDialog.message}</h3>
             <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={() => { confirmDialog.resolve(false); setConfirmDialog(null); }}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
-                Отмена
-              </button>
+              {!confirmDialog.isAlert && (
+                <button
+                  type="button"
+                  onClick={() => { confirmDialog.resolve(false); setConfirmDialog(null); }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Отмена
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { confirmDialog.resolve(true); setConfirmDialog(null); }}
                 className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700"
               >
-                Перезаписать
+                {confirmDialog.isAlert ? 'ОК' : 'Перезаписать'}
               </button>
             </div>
           </div>
