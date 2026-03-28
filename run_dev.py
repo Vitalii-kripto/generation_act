@@ -23,13 +23,15 @@ logger = logging.getLogger("RunDev")
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+fh = logging.FileHandler(LOG_FILE, mode='w', encoding='utf-8')
 fh.setFormatter(formatter)
 logger.addHandler(fh)
 
 ch = logging.StreamHandler(sys.stdout)
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+
+logger.info("Общий лог-файл был очищен и перезаписан для нового запуска.")
 
 def is_port_free(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -52,11 +54,13 @@ def stream_process_output(process: subprocess.Popen, prefix: str):
     try:
         for line in process.stdout:
             line = line.rstrip()
+            # Print to console with prefix
             print(f"[{prefix}] {line}")
+            # Write to file with prefix and timestamp
             try:
                 with open(LOG_FILE, "a", encoding="utf-8") as f:
                     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-                    f.write(f"{timestamp} - {prefix} - INFO - {line}\n")
+                    f.write(f"{timestamp} - {prefix} - {line}\n")
             except Exception:
                 pass # Ignore file write errors to not crash the thread
     except Exception as e:
@@ -159,6 +163,8 @@ def main() -> None:
     env["FRONTEND_HOST"] = frontend_host
     env["FRONTEND_PORT"] = str(frontend_port)
     env["VITE_BACKEND_URL"] = f"http://{backend_host}:{backend_port}"
+    env["LOG_MODE"] = "a"
+    env["RUN_DEV"] = "1"
 
     logger.info("=" * 72)
     logger.info(f"Переменные окружения:")

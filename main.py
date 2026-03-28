@@ -32,13 +32,20 @@ except Exception as e:
 
 # Настройка логирования
 os.makedirs("logs", exist_ok=True)
+log_mode = os.environ.get("LOG_MODE", "w")
+handlers = [logging.StreamHandler()]
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+if os.environ.get("RUN_DEV"):
+    # When running under run_dev.py, simplify the format since run_dev.py adds timestamp and prefix
+    log_format = '%(levelname)s - %(message)s'
+else:
+    handlers.append(logging.FileHandler("logs/app.log", mode=log_mode, encoding='utf-8'))
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("logs/app.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    format=log_format,
+    handlers=handlers
 )
 logger = logging.getLogger("FastAPI_Main")
 ai_logger = logging.getLogger("AiService")
