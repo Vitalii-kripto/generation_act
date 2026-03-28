@@ -348,10 +348,15 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           
           allExtractedData.push(data);
         } catch (err) {
-          const errorMessage =
+          const rawErrorMessage =
             err instanceof Error ? err.message : "Неизвестная ошибка извлечения";
 
-          extractionErrors.push(`${file.name}: ${errorMessage}`);
+          const userFriendlyMessage =
+            rawErrorMessage.includes("503") || rawErrorMessage.includes("UNAVAILABLE")
+              ? "Сервис Gemini временно перегружен. Выполнены повторные попытки и переключение на резервную модель gemini-3.1-flash-lite-preview. Повторите загрузку через 10–30 секунд."
+              : rawErrorMessage;
+
+          extractionErrors.push(`${file.name}: ${userFriendlyMessage}`);
           console.error(`Error extracting from file ${file.name}:`, err);
 
           await fetch("/api/frontend-log", {
@@ -364,7 +369,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
               context: {
                 fileName: file.name,
                 mimeType: file.type,
-                error: errorMessage,
+                error: rawErrorMessage,
               },
             }),
           });
