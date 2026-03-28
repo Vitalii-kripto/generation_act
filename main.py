@@ -82,6 +82,12 @@ class UsageLog(BaseModel):
     total_tokens: int
     action: str  # e.g., "upd_extraction", "spec_extraction"
 
+class FrontendLog(BaseModel):
+    level: str
+    message: str
+    source: Optional[str] = "frontend"
+    context: Optional[dict] = None
+
 def init_db():
     try:
         logger.info("Initializing database...")
@@ -424,6 +430,33 @@ async def log_usage(log: UsageLog):
         return {"success": True}
     except Exception as e:
         logger.error(f"Error logging usage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/frontend-log")
+async def frontend_log(log: FrontendLog):
+    try:
+        frontend_logger = logging.getLogger("FrontendClient")
+        payload = {
+            "source": log.source,
+            "message": log.message,
+            "context": log.context or {}
+        }
+
+        level = (log.level or "info").lower()
+        text = json.dumps(payload, ensure_ascii=False)
+
+        if level == "debug":
+            frontend_logger.debug(text)
+        elif level == "warning":
+            frontend_logger.warning(text)
+        elif level == "error":
+            frontend_logger.error(text)
+        else:
+            frontend_logger.info(text)
+
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error logging frontend message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/usage/stats")

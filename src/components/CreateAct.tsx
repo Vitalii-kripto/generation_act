@@ -279,6 +279,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
     
     try {
       const allExtractedData = [];
+      const extractionErrors: string[] = [];
       
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -326,21 +327,68 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
               }
             } else {
               console.error("Failed to save UPD to registry:", err);
+
+              await fetch("/api/frontend-log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  level: "error",
+                  source: "CreateAct",
+                  message: "Не удалось сохранить извлеченный УПД в реестр",
+                  context: {
+                    fileName: file.name,
+                    updNumber: updToSave.updNumber,
+                    updDate: updToSave.updDate,
+                    error: err instanceof Error ? err.message : String(err),
+                  },
+                }),
+              });
             }
           }
           
           allExtractedData.push(data);
         } catch (err) {
+          const errorMessage =
+            err instanceof Error ? err.message : "Неизвестная ошибка извлечения";
+
+          extractionErrors.push(`${file.name}: ${errorMessage}`);
           console.error(`Error extracting from file ${file.name}:`, err);
+
+          await fetch("/api/frontend-log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              level: "error",
+              source: "CreateAct",
+              message: "Ошибка извлечения данных из файла УПД",
+              context: {
+                fileName: file.name,
+                mimeType: file.type,
+                error: errorMessage,
+              },
+            }),
+          });
         }
       }
 
       if (allExtractedData.length === 0) {
-        alert("Не удалось извлечь данные ни из одного файла.");
+        const message =
+          extractionErrors.length > 0
+            ? "Не удалось извлечь данные ни из одного файла:\n\n" + extractionErrors.join("\n")
+            : "Не удалось извлечь данные ни из одного файла.";
+
+        alert(message);
         return;
       }
 
       await applySelectedUpds(allExtractedData as UpdResponse[]);
+      
+      if (extractionErrors.length > 0) {
+        alert(
+          "Часть файлов обработана, но по некоторым возникли ошибки:\n\n" +
+            extractionErrors.join("\n")
+        );
+      }
       
     } catch (err) {
       console.error("Aggregation error:", err);
