@@ -78,25 +78,48 @@ def wait_for_http(url: str, timeout: int = 30, prefix: str = "") -> bool:
     return False
 
 def validate_environment():
-    # Check package.json
+    logger.info(f"Текущая рабочая директория (CWD): {os.getcwd()}")
+    logger.info(f"Вычисленный корень проекта (ROOT): {ROOT}")
+    
     pkg_path = ROOT / "package.json"
+    main_path = ROOT / "main.py"
+    
+    logger.info(f"Абсолютный путь к package.json: {pkg_path}")
+    logger.info(f"Абсолютный путь к main.py: {main_path}")
+    
     if not pkg_path.exists():
-        logger.error("Файл package.json не найден.")
+        logger.error(f"Файл package.json не найден по пути: {pkg_path}")
+        sys.exit(1)
+        
+    if not main_path.exists():
+        logger.error(f"Файл main.py не найден по пути: {main_path}")
         sys.exit(1)
     
     try:
-        with open(pkg_path, "r", encoding="utf-8") as f:
-            pkg_data = json.load(f)
+        # Using utf-8-sig to handle potential BOM
+        with open(pkg_path, "r", encoding="utf-8-sig") as f:
+            pkg_content = f.read()
+            pkg_data = json.loads(pkg_content)
     except json.JSONDecodeError as e:
         logger.error(f"Ошибка чтения package.json: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при чтении package.json: {e}")
         sys.exit(1)
     
     if "scripts" not in pkg_data:
         logger.error("В package.json отсутствует раздел 'scripts'.")
+        logger.error(f"Фрагмент JSON: {pkg_content[:200]}...")
         sys.exit(1)
         
-    if "frontend" not in pkg_data["scripts"]:
-        logger.error("В package.json отсутствует скрипт 'frontend'.")
+    scripts = pkg_data.get("scripts", {})
+    logger.info(f"Обнаруженные npm-скрипты: {list(scripts.keys())}")
+        
+    if "frontend" not in scripts or not scripts["frontend"].strip():
+        logger.error("В package.json отсутствует или пуст скрипт 'frontend'.")
+        logger.error(f"Полный путь к package.json: {pkg_path}")
+        logger.error(f"Список обнаруженных scripts: {list(scripts.keys())}")
+        logger.error(f"Фрагмент прочитанного JSON: {pkg_content[:500]}...")
         sys.exit(1)
         
     # Check node_modules
@@ -107,7 +130,7 @@ def validate_environment():
     # Check npm command
     npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
     if shutil.which(npm_cmd) is None:
-        logger.error(f"Команда '{npm_cmd}' не найдена. Убедитесь, что Node.js установлен.")
+        logger.error(f"Команда '{npm_cmd}' не найдена. Убедитесь, что Node.js установлен и добавлен в PATH.")
         sys.exit(1)
         
     return npm_cmd
@@ -138,8 +161,12 @@ def main() -> None:
     env["VITE_BACKEND_URL"] = f"http://{backend_host}:{backend_port}"
 
     logger.info("=" * 72)
-    logger.info(f"Backend  -> http://{backend_host}:{backend_port}")
-    logger.info(f"Frontend -> http://{frontend_host}:{frontend_port}")
+    logger.info(f"Переменные окружения:")
+    logger.info(f"  BACKEND_HOST: {env['BACKEND_HOST']}")
+    logger.info(f"  BACKEND_PORT: {env['BACKEND_PORT']}")
+    logger.info(f"  FRONTEND_HOST: {env['FRONTEND_HOST']}")
+    logger.info(f"  FRONTEND_PORT: {env['FRONTEND_PORT']}")
+    logger.info(f"  VITE_BACKEND_URL: {env['VITE_BACKEND_URL']}")
     logger.info("=" * 72)
 
     python_exe = sys.executable
@@ -148,6 +175,8 @@ def main() -> None:
     frontend_cmd = [npm_cmd, "run", "frontend", "--", "--host", frontend_host, "--port", str(frontend_port)]
 
     logger.info(f"Команда запуска бэкенда: {' '.join(backend_cmd)}")
+    logger.info(f"CWD для бэкенда: {ROOT}")
+    
     try:
         backend_process = subprocess.Popen(
             backend_cmd,
@@ -175,6 +204,8 @@ def main() -> None:
     logger.info("Бэкенд успешно запущен и доступен.")
 
     logger.info(f"Команда запуска фронтенда: {' '.join(frontend_cmd)}")
+    logger.info(f"CWD для фронтенда: {ROOT}")
+    
     try:
         frontend_process = subprocess.Popen(
             frontend_cmd,
