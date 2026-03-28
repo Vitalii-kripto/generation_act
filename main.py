@@ -923,6 +923,10 @@ async def search_eis(query: str):
         logger.error(f"Unexpected EIS search error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal error during EIS search: {str(e)}")
 
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}
+
 @app.get("/api/acts")
 async def get_acts():
     try:

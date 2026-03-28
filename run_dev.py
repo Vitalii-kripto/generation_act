@@ -6,7 +6,12 @@ import time
 import webbrowser
 import logging
 import threading
+import json
+import urllib.request
+import urllib.error
+from datetime import datetime
 from pathlib import Path
+import shutil
 
 ROOT = Path(__file__).resolve().parent
 LOGS_DIR = ROOT / "logs"
@@ -44,14 +49,74 @@ def find_free_port(start_port: int, host: str = "127.0.0.1", max_tries: int = 20
 def stream_process_output(process: subprocess.Popen, prefix: str):
     if process.stdout is None:
         return
-    for line in process.stdout:
-        line = line.rstrip()
-        print(f"[{prefix}] {line}")
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - {prefix} - INFO - {line}\n")
+    try:
+        for line in process.stdout:
+            line = line.rstrip()
+            print(f"[{prefix}] {line}")
+            try:
+                with open(LOG_FILE, "a", encoding="utf-8") as f:
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+                    f.write(f"{timestamp} - {prefix} - INFO - {line}\n")
+            except Exception:
+                pass # Ignore file write errors to not crash the thread
+    except Exception as e:
+        logger.error(f"Ошибка при чтении вывода процесса {prefix}: {e}")
+
+def wait_for_http(url: str, timeout: int = 30, prefix: str = "") -> bool:
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=2) as response:
+                if response.getcode() == 200:
+                    return True
+        except urllib.error.URLError:
+            pass
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
+def validate_environment():
+    # Check package.json
+    pkg_path = ROOT / "package.json"
+    if not pkg_path.exists():
+        logger.error("Файл package.json не найден.")
+        sys.exit(1)
+    
+    try:
+        with open(pkg_path, "r", encoding="utf-8") as f:
+            pkg_data = json.load(f)
+    except json.JSONDecodeError as e:
+        logger.error(f"Ошибка чтения package.json: {e}")
+        sys.exit(1)
+    
+    if "scripts" not in pkg_data:
+        logger.error("В package.json отсутствует раздел 'scripts'.")
+        sys.exit(1)
+        
+    if "frontend" not in pkg_data["scripts"]:
+        logger.error("В package.json отсутствует скрипт 'frontend'.")
+        sys.exit(1)
+        
+    # Check node_modules
+    if not (ROOT / "node_modules").exists():
+        logger.error("Папка node_modules не найдена. Пожалуйста, выполните 'npm install'.")
+        sys.exit(1)
+        
+    # Check npm command
+    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+    if shutil.which(npm_cmd) is None:
+        logger.error(f"Команда '{npm_cmd}' не найдена. Убедитесь, что Node.js установлен.")
+        sys.exit(1)
+        
+    return npm_cmd
 
 def main() -> None:
     logger.info("Запуск стартового скрипта run_dev.py")
+    
+    npm_cmd = validate_environment()
+    
     backend_host = "127.0.0.1"
     frontend_host = "127.0.0.1"
 
@@ -78,12 +143,11 @@ def main() -> None:
     logger.info("=" * 72)
 
     python_exe = sys.executable
-    npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
 
     backend_cmd = [python_exe, "-u", str(ROOT / "main.py")]
     frontend_cmd = [npm_cmd, "run", "frontend", "--", "--host", frontend_host, "--port", str(frontend_port)]
 
-    logger.info("Запуск процесса бэкенда...")
+    logger.info(f"Команда запуска бэкенда: {' '.join(backend_cmd)}")
     try:
         backend_process = subprocess.Popen(
             backend_cmd,
@@ -94,14 +158,23 @@ def main() -> None:
             text=True,
             bufsize=1,
         )
-        logger.info("Бэкенд успешно запущен.")
     except Exception as e:
         logger.error(f"Ошибка запуска бэкенда: {e}")
         sys.exit(1)
 
-    time.sleep(2)
+    t1 = threading.Thread(target=stream_process_output, args=(backend_process, "BACKEND"), daemon=True)
+    t1.start()
 
-    logger.info("Запуск процесса фронтенда...")
+    # Wait for backend to be ready
+    backend_url = f"http://{backend_host}:{backend_port}/api/health"
+    logger.info(f"Ожидание запуска бэкенда по адресу {backend_url}...")
+    if not wait_for_http(backend_url, timeout=30, prefix="BACKEND"):
+        logger.error("Бэкенд не ответил вовремя. Завершение работы.")
+        backend_process.terminate()
+        sys.exit(1)
+    logger.info("Бэкенд успешно запущен и доступен.")
+
+    logger.info(f"Команда запуска фронтенда: {' '.join(frontend_cmd)}")
     try:
         frontend_process = subprocess.Popen(
             frontend_cmd,
@@ -113,24 +186,29 @@ def main() -> None:
             bufsize=1,
             shell=False,
         )
-        logger.info("Фронтенд успешно запущен.")
     except Exception as e:
         logger.error(f"Ошибка запуска фронтенда: {e}")
         backend_process.terminate()
         sys.exit(1)
 
+    t2 = threading.Thread(target=stream_process_output, args=(frontend_process, "FRONTEND"), daemon=True)
+    t2.start()
+
+    # Wait for frontend to be ready
+    frontend_url = f"http://{frontend_host}:{frontend_port}"
+    logger.info(f"Ожидание запуска фронтенда по адресу {frontend_url}...")
+    if not wait_for_http(frontend_url, timeout=60, prefix="FRONTEND"):
+        logger.error("Фронтенд не ответил вовремя. Завершение работы.")
+        backend_process.terminate()
+        frontend_process.terminate()
+        sys.exit(1)
+    logger.info("Фронтенд успешно запущен и доступен.")
+
     try:
-        time.sleep(2)
-        frontend_url = f"http://{frontend_host}:{frontend_port}"
         logger.info(f"Открытие браузера по адресу {frontend_url}")
         webbrowser.open(frontend_url)
     except Exception as exc:
         logger.error(f"Не удалось открыть браузер автоматически: {exc}")
-
-    t1 = threading.Thread(target=stream_process_output, args=(backend_process, "BACKEND"), daemon=True)
-    t2 = threading.Thread(target=stream_process_output, args=(frontend_process, "FRONTEND"), daemon=True)
-    t1.start()
-    t2.start()
 
     try:
         while True:
@@ -140,22 +218,24 @@ def main() -> None:
             if backend_code is not None:
                 logger.error(f"BACKEND завершился с кодом {backend_code}")
                 frontend_process.terminate()
-                break
+                sys.exit(1)
 
             if frontend_code is not None:
                 logger.error(f"FRONTEND завершился с кодом {frontend_code}")
                 backend_process.terminate()
-                break
+                sys.exit(1)
 
             time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Остановка процессов пользователем (KeyboardInterrupt)...")
         backend_process.terminate()
         frontend_process.terminate()
+        sys.exit(0)
     except Exception as e:
         logger.error(f"Системное исключение в главном цикле: {e}")
         backend_process.terminate()
         frontend_process.terminate()
+        sys.exit(1)
     finally:
         try:
             backend_process.wait(timeout=5)
