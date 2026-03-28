@@ -182,16 +182,17 @@ export function UpdRegistry() {
   };
 
   const checkUpdUsedInOtherAct = (updNumber: string, updDate: string) => {
-    const cleanNumber = updNumber.trim();
+    if (!updNumber || !updDate) return false;
+    const cleanNumber = updNumber.trim().toLowerCase();
     const cleanDate = normalizeDate(updDate);
     
     for (const a of acts) {
       if (a.updDetails && a.updDetails.length > 0) {
-        if (a.updDetails.some(d => d.number.trim() === cleanNumber && normalizeDate(d.date) === cleanDate)) {
+        if (a.updDetails.some(d => d.number.trim().toLowerCase() === cleanNumber && normalizeDate(d.date) === cleanDate)) {
           return true;
         }
       } else if (a.updNumber && a.updDate) {
-        const numbers = a.updNumber.split(',').map(s => s.trim());
+        const numbers = a.updNumber.split(',').map(s => s.trim().toLowerCase());
         const dates = a.updDate.split(',').map(s => normalizeDate(s.trim()));
         const count = Math.min(numbers.length, dates.length);
         for (let i = 0; i < count; i++) {

@@ -26,17 +26,20 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   };
 
   const checkUpdUsedInOtherAct = (updNumber: string, updDate: string) => {
-    const cleanNumber = updNumber.trim();
+    if (!updNumber || !updDate) return null;
+    const cleanNumber = updNumber.trim().toLowerCase();
     const cleanDate = normalizeDate(updDate);
     
     for (const a of acts) {
+      // Skip the current act if we are editing
       if (initialAct && a.id === initialAct.id) continue;
+      
       if (a.updDetails && a.updDetails.length > 0) {
-        if (a.updDetails.some(d => d.number.trim() === cleanNumber && normalizeDate(d.date) === cleanDate)) {
+        if (a.updDetails.some(d => d.number.trim().toLowerCase() === cleanNumber && normalizeDate(d.date) === cleanDate)) {
           return a.actNumber;
         }
       } else if (a.updNumber && a.updDate) {
-        const numbers = a.updNumber.split(',').map(s => s.trim());
+        const numbers = a.updNumber.split(',').map(s => s.trim().toLowerCase());
         const dates = a.updDate.split(',').map(s => normalizeDate(s.trim()));
         const count = Math.min(numbers.length, dates.length);
         for (let i = 0; i < count; i++) {
@@ -86,7 +89,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
       }
     }
 
-    if (bestMatch && bestScore > 0.3) {
+    if (bestMatch && bestScore > 0.5) {
       const priceMismatch = item.priceWithVat !== undefined && 
                             Math.abs(item.priceWithVat - bestMatch.priceWithVat) > 0.01;
       return {
@@ -389,6 +392,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
           
           if (fullUpd.items?.length) {
             for (const item of fullUpd.items) {
+              // Try to match with specification
               const matched = matchWithSpecification({
                 id: crypto.randomUUID(),
                 name: item.name || '',
@@ -397,10 +401,10 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
                 priceWithVat: item.priceWithVat || 0,
                 totalWithVat: item.totalWithVat || 0,
                 country: item.country || 'Россия'
-              }, true, true);
+              }, true, false); // strict=false to keep the item even if no match
               
               if (matched) {
-                const existingItem = aggregatedItems.find(i => i.name === matched.name && i.priceWithVat === matched.priceWithVat);
+                const existingItem = aggregatedItems.find(i => i.name === matched.name && Math.abs(i.priceWithVat - (matched.priceWithVat || 0)) < 0.01);
                 if (existingItem) {
                   existingItem.quantity += matched.quantity || 0;
                   existingItem.totalWithVat += matched.totalWithVat || 0;
@@ -411,8 +415,6 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             }
           }
         } else {
-          // If UPD not found in registry, we just keep the amount but can't reconstruct items easily
-          // This is a fallback, ideally all UPDs are in the registry
           totalAmount += detail.amount;
           vatAmount += detail.amount * 0.2; // Assuming 20% VAT as fallback
         }
@@ -424,7 +426,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
         updNumber: updNumbers.join(', '),
         updDate: updDates.join(', '),
         actualDeliveryDate: Array.from(new Set(updDates.map(d => normalizeDate(d)))).join(', '),
-        items: aggregatedItems.length > 0 ? aggregatedItems : prev.items,
+        items: aggregatedItems,
         totalAmount,
         vatAmount
       };
@@ -482,6 +484,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
 
       if (data.items?.length) {
         for (const item of data.items) {
+          // Try to match with specification
           const matched = matchWithSpecification({
             id: crypto.randomUUID(),
             name: item.name || '',
@@ -490,25 +493,27 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
             priceWithVat: item.priceWithVat || 0,
             totalWithVat: item.totalWithVat || 0,
             country: item.country || 'Россия'
-          }, true, true);
+          }, true, false); // strict=false to keep the item even if no match
           
           if (matched) {
-            const existingItem = aggregatedItems.find(i => i.name === matched.name && i.priceWithVat === matched.priceWithVat);
+            // Check if it matched a spec item
+            if (!matched.specNumber) {
+              unmatchedNames.push(item.name || 'Неизвестная позиция');
+            }
+
+            const existingItem = aggregatedItems.find(i => i.name === matched.name && Math.abs(i.priceWithVat - (matched.priceWithVat || 0)) < 0.01);
             if (existingItem) {
               existingItem.quantity += matched.quantity || 0;
               existingItem.totalWithVat += matched.totalWithVat || 0;
             } else {
               aggregatedItems.push(matched as ActItem);
             }
-          } else {
-            unmatchedNames.push(item.name || 'Неизвестная позиция');
           }
         }
       }
     }
 
     if (updDetails.length === 0) {
-      // If no UPDs were added (e.g., all were skipped), don't update the act
       setShowUpdSelector(false);
       return;
     }

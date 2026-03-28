@@ -20,6 +20,8 @@ import holidays
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
+import asyncio
+from playwright.async_api import async_playwright
 
 # Marker file to verify the script is running
 try:
@@ -36,8 +38,10 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger("ActApp")
-logger.info("Logging to file initialized")
+logger = logging.getLogger("FastAPI_Main")
+ai_logger = logging.getLogger("AiService")
+logger.info("Logging initialized")
+ai_logger.info("Initializing AiService...")
 
 app = FastAPI()
 
@@ -517,8 +521,8 @@ async def create_upd(upd: Upd, overwrite: bool = False):
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             
-            # Check uniqueness
-            cursor.execute("SELECT id FROM upds WHERE updNumber = ? AND updDate = ?", (upd.updNumber, upd.updDate))
+            # Check uniqueness (case-insensitive for number)
+            cursor.execute("SELECT id FROM upds WHERE LOWER(TRIM(updNumber)) = LOWER(TRIM(?)) AND updDate = ?", (upd.updNumber, upd.updDate))
             existing = cursor.fetchone()
             
             if existing and not overwrite:
@@ -852,6 +856,71 @@ async def export_upds():
         logger.error(f"Error exporting upds: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/eis/search")
+async def search_eis(query: str):
+    logger.info(f"Searching EIS for: {query}")
+    try:
+        async with async_playwright() as p:
+            # Launch browser with some arguments to avoid detection
+            browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+            
+            # Set timeout to 45 seconds
+            page.set_default_timeout(45000)
+            
+            # EIS search URL
+            url = f"https://zakupki.gov.ru/epz/order/extendedsearch/results.html?searchString={query}&morphology=on&search-filter=%D0%94%D0%B0%D1%82%D0%B5+%D1%80%D0%B0%D0%B7%D0%BC%D0%B5%D1%89%D0%B5%D0%BD%D0%B8%D1%8F&pageNumber=1&sortDirection=false&recordsPerPage=_10&showLotsInfo=false&sortBy=UPDATE_DATE&fz44=on&fz223=on&af=on&ca=on&pc=on&pa=on&currencyIdAll=-1"
+            
+            try:
+                await page.goto(url, wait_until="domcontentloaded")
+                # Wait for results or "no results" message
+                await page.wait_for_selector(".search-registry-entry-block, .no-results", timeout=30000)
+            except Exception as e:
+                logger.error(f"Timeout or error navigating to EIS: {e}")
+                await browser.close()
+                raise HTTPException(status_code=504, detail="EIS search timed out. Please try again later.")
+
+            # Extract results
+            results = []
+            entries = await page.query_selector_all(".search-registry-entry-block")
+            for entry in entries:
+                try:
+                    number_el = await entry.query_selector(".registry-entry__header-mid__number a")
+                    number = await number_el.inner_text() if number_el else ""
+                    link = await number_el.get_attribute("href") if number_el else ""
+                    if link and not link.startswith("http"):
+                        link = "https://zakupki.gov.ru" + link
+                        
+                    status_el = await entry.query_selector(".registry-entry__header-mid__item")
+                    status = await status_el.inner_text() if status_el else ""
+                    
+                    customer_el = await entry.query_selector(".registry-entry__body-href a")
+                    customer = await customer_el.inner_text() if customer_el else ""
+                    
+                    amount_el = await entry.query_selector(".price-block__value")
+                    amount = await amount_el.inner_text() if amount_el else ""
+                    
+                    results.append({
+                        "number": number.strip(),
+                        "link": link,
+                        "status": status.strip(),
+                        "customer": customer.strip(),
+                        "amount": amount.strip()
+                    })
+                except:
+                    continue
+            
+            await browser.close()
+            return {"results": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected EIS search error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal error during EIS search: {str(e)}")
+
 @app.get("/api/acts")
 async def get_acts():
     try:
@@ -885,6 +954,35 @@ async def save_act(act: Act):
         # Use model_dump() for Pydantic v2, fallback to dict() for v1
         def get_dict(obj):
             return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Check if any UPD in this act is used in another act
+            if act.updDetails:
+                # Fetch all other acts to check their UPDs
+                cursor.execute("SELECT id, actNumber, updDetails FROM acts WHERE id != ?", (act.id,))
+                other_acts = cursor.fetchall()
+                
+                for detail in act.updDetails:
+                    clean_num = detail.number.strip().lower()
+                    clean_date = detail.date.strip()
+                    
+                    for other_act in other_acts:
+                        if other_act['updDetails']:
+                            try:
+                                other_details = json.loads(other_act['updDetails'])
+                                for od in other_details:
+                                    od_num = od.get('number', '').strip().lower()
+                                    od_date = od.get('date', '').strip()
+                                    if od_num == clean_num and od_date == clean_date:
+                                        raise HTTPException(
+                                            status_code=409, 
+                                            detail=f"УПД №{detail.number} от {detail.date} уже используется в Акте №{other_act['actNumber']}"
+                                        )
+                            except json.JSONDecodeError:
+                                continue
 
         items_json = json.dumps([get_dict(item) for item in act.items])
         upd_details_json = json.dumps([get_dict(d) for d in act.updDetails]) if act.updDetails else None
@@ -1358,5 +1456,17 @@ async def import_backup(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+
+    host = os.getenv("BACKEND_HOST", "127.0.0.1")
+    port = int(os.getenv("BACKEND_PORT", "8001"))
+    reload_enabled = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
+
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        reload=reload_enabled,
+        log_level="info",
+    )

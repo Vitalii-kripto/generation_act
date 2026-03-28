@@ -61,6 +61,13 @@ async function logUsage(response: any, action: string) {
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(message)), ms))
+  ]);
+}
+
 export async function extractDataFromUPD(base64Data: string, mimeType: string): Promise<ExtractedUPDData> {
   const ai = getAI();
   const prompt = `
@@ -88,56 +95,60 @@ export async function extractDataFromUPD(base64Data: string, mimeType: string): 
     - vatRate: Ставка НДС в процентах (Налоговая ставка, например, 20 или 22). Если ставок несколько, укажите основную.
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType,
-            data: base64Data,
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
           },
-        },
-        {
-          text: prompt,
-        },
-      ],
-    },
-    config: {
-      responseMimeType: "application/json",
-      maxOutputTokens: 8192, // Increase token limit for large documents
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          updNumber: { type: Type.STRING },
-          updDate: { type: Type.STRING },
-          contractNumber: { type: Type.STRING },
-          contractDate: { type: Type.STRING },
-          supplierName: { type: Type.STRING },
-          supplierShortName: { type: Type.STRING },
-          customerName: { type: Type.STRING },
-          customerShortName: { type: Type.STRING },
-          items: {
-            type: Type.ARRAY,
+          {
+            text: prompt,
+          },
+        ],
+      },
+      config: {
+        responseMimeType: "application/json",
+        maxOutputTokens: 8192, // Increase token limit for large documents
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            updNumber: { type: Type.STRING },
+            updDate: { type: Type.STRING },
+            contractNumber: { type: Type.STRING },
+            contractDate: { type: Type.STRING },
+            supplierName: { type: Type.STRING },
+            supplierShortName: { type: Type.STRING },
+            customerName: { type: Type.STRING },
+            customerShortName: { type: Type.STRING },
             items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                unit: { type: Type.STRING },
-                quantity: { type: Type.NUMBER },
-                priceWithVat: { type: Type.NUMBER },
-                totalWithVat: { type: Type.NUMBER },
-                country: { type: Type.STRING },
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  unit: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER },
+                  priceWithVat: { type: Type.NUMBER },
+                  totalWithVat: { type: Type.NUMBER },
+                  country: { type: Type.STRING },
+                }
               }
-            }
-          },
-          totalAmount: { type: Type.NUMBER },
-          vatAmount: { type: Type.NUMBER },
-          vatRate: { type: Type.NUMBER },
+            },
+            totalAmount: { type: Type.NUMBER },
+            vatAmount: { type: Type.NUMBER },
+            vatRate: { type: Type.NUMBER },
+          }
         }
       }
-    }
-  });
+    }),
+    60000, // 60 seconds timeout
+    "Превышено время ожидания ответа от Gemini API. Пожалуйста, попробуйте еще раз или используйте документ меньшего размера."
+  );
 
   await logUsage(response, "upd_extraction");
 
@@ -172,41 +183,45 @@ export async function extractSpecificationFromPDF(base64Data: string, mimeType: 
     - country: Страна происхождения (если указана, иначе "Россия").
   `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType,
-            data: base64Data,
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
           },
-        },
-        {
-          text: prompt,
-        },
-      ],
-    },
-    config: {
-      responseMimeType: "application/json",
-      maxOutputTokens: 8192, // Increase token limit
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            specNumber: { type: Type.STRING },
-            name: { type: Type.STRING },
-            unit: { type: Type.STRING },
-            quantity: { type: Type.NUMBER },
-            priceWithVat: { type: Type.NUMBER },
-            totalWithVat: { type: Type.NUMBER },
-            country: { type: Type.STRING },
+          {
+            text: prompt,
+          },
+        ],
+      },
+      config: {
+        responseMimeType: "application/json",
+        maxOutputTokens: 8192, // Increase token limit
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              specNumber: { type: Type.STRING },
+              name: { type: Type.STRING },
+              unit: { type: Type.STRING },
+              quantity: { type: Type.NUMBER },
+              priceWithVat: { type: Type.NUMBER },
+              totalWithVat: { type: Type.NUMBER },
+              country: { type: Type.STRING },
+            }
           }
         }
       }
-    }
-  });
+    }),
+    90000, // 90 seconds timeout for specification (can be large)
+    "Превышено время ожидания обработки спецификации. Пожалуйста, попробуйте еще раз."
+  );
 
   await logUsage(response, "spec_extraction");
 
