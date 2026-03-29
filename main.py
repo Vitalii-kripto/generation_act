@@ -557,6 +557,9 @@ async def get_upds():
         logger.error(f"Error fetching upds: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+def dump_model(obj):
+    return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
+
 @app.post("/api/upds")
 async def create_upd(upd: Upd, overwrite: bool = False):
     try:
@@ -580,7 +583,7 @@ async def create_upd(upd: Upd, overwrite: bool = False):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 upd.id, upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
-                json.dumps([item.dict() for item in upd.items]),
+                json.dumps([dump_model(item) for item in upd.items]),
                 upd.totalAmount, upd.vatAmount, upd.vatRate, upd.source,
                 1 if upd.isUsedInAct else 0,
                 1 if upd.isPaid else 0
@@ -588,7 +591,7 @@ async def create_upd(upd: Upd, overwrite: bool = False):
             conn.commit()
             
             dates_info = calculate_upd_dates(upd.updDate)
-            response_data = upd.dict()
+            response_data = dump_model(upd)
             response_data.update(dates_info)
             return response_data
     except HTTPException:
@@ -610,7 +613,7 @@ async def update_upd(id: str, upd: Upd):
                 WHERE id = ?
             ''', (
                 upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
-                json.dumps([item.dict() for item in upd.items]),
+                json.dumps([dump_model(item) for item in upd.items]),
                 upd.totalAmount, upd.vatAmount, upd.vatRate,
                 upd.source, 1 if upd.isUsedInAct else 0,
                 1 if upd.isPaid else 0, id
@@ -618,7 +621,7 @@ async def update_upd(id: str, upd: Upd):
             conn.commit()
             
             dates_info = calculate_upd_dates(upd.updDate)
-            response_data = upd.dict()
+            response_data = dump_model(upd)
             response_data.update(dates_info)
             return response_data
     except Exception as e:
@@ -997,10 +1000,6 @@ async def save_act(act: Act):
     try:
         logger.info(f"Saving act: {act.actNumber} (ID: {act.id})")
         
-        # Use model_dump() for Pydantic v2, fallback to dict() for v1
-        def get_dict(obj):
-            return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
-
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -1030,8 +1029,8 @@ async def save_act(act: Act):
                             except json.JSONDecodeError:
                                 continue
 
-        items_json = json.dumps([get_dict(item) for item in act.items])
-        upd_details_json = json.dumps([get_dict(d) for d in act.updDetails]) if act.updDetails else None
+        items_json = json.dumps([dump_model(item) for item in act.items])
+        upd_details_json = json.dumps([dump_model(d) for d in act.updDetails]) if act.updDetails else None
 
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
@@ -1054,6 +1053,31 @@ async def save_act(act: Act):
                 act.signatureImage,
                 act.stampImage
             ))
+            
+            # Update UPDs status
+            # First, mark all UPDs as not used
+            cursor.execute("UPDATE upds SET isUsedInAct = 0")
+            
+            # Then, mark UPDs used in any act as used
+            cursor.execute("SELECT updDetails FROM acts")
+            all_acts = cursor.fetchall()
+            
+            used_upds = set()
+            for row in all_acts:
+                if row[0]: # updDetails is the first column in this query
+                    try:
+                        details = json.loads(row[0])
+                        for detail in details:
+                            used_upds.add((detail.get('number', '').strip().lower(), detail.get('date', '').strip()))
+                    except json.JSONDecodeError:
+                        continue
+            
+            for num, date in used_upds:
+                cursor.execute(
+                    "UPDATE upds SET isUsedInAct = 1 WHERE LOWER(TRIM(updNumber)) = ? AND updDate = ?",
+                    (num, date)
+                )
+                
             conn.commit()
         
         logger.info(f"Act {act.actNumber} saved successfully")
@@ -1178,11 +1202,7 @@ def num_to_words_ru(n: float) -> str:
 async def generate_docx_from_data(act_data: Act):
     try:
         logger.info(f"Generating DOCX for act: {act_data.actNumber}")
-        # Use model_dump() for Pydantic v2, fallback to dict() for v1
-        def get_dict(obj):
-            return obj.model_dump() if hasattr(obj, 'model_dump') else obj.dict()
-
-        act = get_dict(act_data)
+        act = dump_model(act_data)
         items = act['items']
         upd_details = act.get('updDetails') or []
 
