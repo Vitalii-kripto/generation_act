@@ -17,6 +17,10 @@ export function Settings() {
   const [usageStats, setUsageStats] = useState<any>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   
+  useEffect(() => {
+    setLocalNumber(nextActNumber.toString());
+  }, [nextActNumber]);
+
   const signatureInputRef = useRef<HTMLInputElement>(null);
   const stampInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);

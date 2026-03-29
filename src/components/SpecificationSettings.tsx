@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useActContext } from '../store/ActContext';
 import { useUndo } from '../store/UndoContext';
 import { SpecificationItem } from '../types';
@@ -14,8 +14,7 @@ export function SpecificationSettings() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync local items state when specification is loaded from backend
-  React.useEffect(() => {
+  useEffect(() => {
     setItems(specification);
   }, [specification]);
 

@@ -39,7 +39,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
           const data = await response.json();
           
           if (data.specification) {
-            setSpecificationState(data.specification);
+            setSpecificationState(typeof data.specification === 'string' ? JSON.parse(data.specification) : data.specification);
           } else {
             // Fallback to localStorage
             const savedSpec = localStorage.getItem('specification');
