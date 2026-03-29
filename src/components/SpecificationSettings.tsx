@@ -14,6 +14,11 @@ export function SpecificationSettings() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync local items state when specification is loaded from backend
+  React.useEffect(() => {
+    setItems(specification);
+  }, [specification]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;

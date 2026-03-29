@@ -29,6 +29,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
   const [signatureImage, setSignatureImageState] = useState<string | null>(null);
   const [stampImage, setStampImageState] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -87,6 +88,8 @@ export function ActProvider({ children }: { children: ReactNode }) {
         } catch (e) {}
       } finally {
         setIsInitialized(true);
+        // Add a small delay before allowing saves to prevent initial state syncs
+        setTimeout(() => setIsInitialLoadComplete(true), 500);
       }
     };
 
@@ -112,24 +115,28 @@ export function ActProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem('nextActNumber', nextActNumber.toString());
-      fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nextActNumber })
-      }).catch(console.error);
+      if (isInitialLoadComplete) {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nextActNumber })
+        }).catch(console.error);
+      }
     }
-  }, [nextActNumber, isInitialized]);
+  }, [nextActNumber, isInitialized, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem('specification', JSON.stringify(specification));
-      fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specification })
-      }).catch(console.error);
+      if (isInitialLoadComplete) {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ specification })
+        }).catch(console.error);
+      }
     }
-  }, [specification, isInitialized]);
+  }, [specification, isInitialized, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialized) {
@@ -138,13 +145,15 @@ export function ActProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.removeItem('signatureImage');
       }
-      fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signatureImage })
-      }).catch(console.error);
+      if (isInitialLoadComplete) {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signatureImage })
+        }).catch(console.error);
+      }
     }
-  }, [signatureImage, isInitialized]);
+  }, [signatureImage, isInitialized, isInitialLoadComplete]);
 
   useEffect(() => {
     if (isInitialized) {
@@ -153,13 +162,15 @@ export function ActProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.removeItem('stampImage');
       }
-      fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stampImage })
-      }).catch(console.error);
+      if (isInitialLoadComplete) {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stampImage })
+        }).catch(console.error);
+      }
     }
-  }, [stampImage, isInitialized]);
+  }, [stampImage, isInitialized, isInitialLoadComplete]);
 
   const addAct = (act: Act) => {
     setActs((prev) => [act, ...prev]);
