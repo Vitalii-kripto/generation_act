@@ -24,12 +24,31 @@ const ActContext = createContext<ActContextType | undefined>(undefined);
 
 export function ActProvider({ children }: { children: ReactNode }) {
   const [acts, setActs] = useState<Act[]>([]);
-  const [specification, setSpecificationState] = useState<SpecificationItem[]>([]);
-  const [nextActNumber, setNextActNumberState] = useState<number>(1);
-  const [signatureImage, setSignatureImageState] = useState<string | null>(null);
-  const [stampImage, setStampImageState] = useState<string | null>(null);
+  const [specification, setSpecificationState] = useState<SpecificationItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('specification');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [nextActNumber, setNextActNumberState] = useState<number>(() => {
+    const saved = localStorage.getItem('nextActNumber');
+    return saved ? parseInt(saved, 10) : 1;
+  });
+  const [signatureImage, setSignatureImageState] = useState<string | null>(() => {
+    return localStorage.getItem('signatureImage');
+  });
+  const [stampImage, setStampImageState] = useState<string | null>(() => {
+    return localStorage.getItem('stampImage');
+  });
   const [isInitialized, setIsInitialized] = useState(false);
-  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const lastSyncedRef = React.useRef<{
+    specification?: string;
+    nextActNumber?: number;
+    signatureImage?: string | null;
+    stampImage?: string | null;
+  }>({});
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -38,34 +57,45 @@ export function ActProvider({ children }: { children: ReactNode }) {
         if (response.ok) {
           const data = await response.json();
           
+          let loadedSpec = [];
           if (data.specification) {
-            setSpecificationState(typeof data.specification === 'string' ? JSON.parse(data.specification) : data.specification);
+            loadedSpec = typeof data.specification === 'string' ? JSON.parse(data.specification) : data.specification;
           } else {
-            // Fallback to localStorage
             const savedSpec = localStorage.getItem('specification');
-            if (savedSpec) setSpecificationState(JSON.parse(savedSpec));
+            if (savedSpec) loadedSpec = JSON.parse(savedSpec);
           }
+          setSpecificationState(loadedSpec);
+          lastSyncedRef.current.specification = JSON.stringify(loadedSpec);
 
+          let loadedNum = 1;
           if (data.nextActNumber) {
-            setNextActNumberState(parseInt(data.nextActNumber, 10));
+            loadedNum = parseInt(data.nextActNumber, 10);
           } else {
             const savedNum = localStorage.getItem('nextActNumber');
-            if (savedNum) setNextActNumberState(parseInt(savedNum, 10));
+            if (savedNum) loadedNum = parseInt(savedNum, 10);
           }
+          setNextActNumberState(loadedNum);
+          lastSyncedRef.current.nextActNumber = loadedNum;
 
+          let loadedSig = null;
           if (data.signatureImage) {
-            setSignatureImageState(data.signatureImage);
+            loadedSig = data.signatureImage;
           } else {
             const savedSig = localStorage.getItem('signatureImage');
-            if (savedSig) setSignatureImageState(savedSig);
+            if (savedSig) loadedSig = savedSig;
           }
+          setSignatureImageState(loadedSig);
+          lastSyncedRef.current.signatureImage = loadedSig;
 
+          let loadedStamp = null;
           if (data.stampImage) {
-            setStampImageState(data.stampImage);
+            loadedStamp = data.stampImage;
           } else {
             const savedStamp = localStorage.getItem('stampImage');
-            if (savedStamp) setStampImageState(savedStamp);
+            if (savedStamp) loadedStamp = savedStamp;
           }
+          setStampImageState(loadedStamp);
+          lastSyncedRef.current.stampImage = loadedStamp;
         }
       } catch (error) {
         console.error('Failed to fetch settings from backend:', error);
@@ -73,23 +103,15 @@ export function ActProvider({ children }: { children: ReactNode }) {
         try {
           const savedSpec = localStorage.getItem('specification');
           if (savedSpec) setSpecificationState(JSON.parse(savedSpec));
-        } catch (e) {}
-        try {
           const savedNum = localStorage.getItem('nextActNumber');
           if (savedNum) setNextActNumberState(parseInt(savedNum, 10));
-        } catch (e) {}
-        try {
           const savedSig = localStorage.getItem('signatureImage');
           if (savedSig) setSignatureImageState(savedSig);
-        } catch (e) {}
-        try {
           const savedStamp = localStorage.getItem('stampImage');
           if (savedStamp) setStampImageState(savedStamp);
         } catch (e) {}
       } finally {
         setIsInitialized(true);
-        // Add a small delay before allowing saves to prevent initial state syncs
-        setTimeout(() => setIsInitialLoadComplete(true), 500);
       }
     };
 
@@ -115,28 +137,39 @@ export function ActProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem('nextActNumber', nextActNumber.toString());
-      if (isInitialLoadComplete) {
+      
+      if (nextActNumber !== lastSyncedRef.current.nextActNumber) {
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nextActNumber })
-        }).catch(console.error);
+        })
+        .then(() => {
+          lastSyncedRef.current.nextActNumber = nextActNumber;
+        })
+        .catch(console.error);
       }
     }
-  }, [nextActNumber, isInitialized, isInitialLoadComplete]);
+  }, [nextActNumber, isInitialized]);
 
   useEffect(() => {
     if (isInitialized) {
-      localStorage.setItem('specification', JSON.stringify(specification));
-      if (isInitialLoadComplete) {
+      const specJson = JSON.stringify(specification);
+      localStorage.setItem('specification', specJson);
+      
+      if (specJson !== lastSyncedRef.current.specification) {
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ specification })
-        }).catch(console.error);
+        })
+        .then(() => {
+          lastSyncedRef.current.specification = specJson;
+        })
+        .catch(console.error);
       }
     }
-  }, [specification, isInitialized, isInitialLoadComplete]);
+  }, [specification, isInitialized]);
 
   useEffect(() => {
     if (isInitialized) {
@@ -145,15 +178,20 @@ export function ActProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.removeItem('signatureImage');
       }
-      if (isInitialLoadComplete) {
+      
+      if (signatureImage !== lastSyncedRef.current.signatureImage) {
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ signatureImage })
-        }).catch(console.error);
+        })
+        .then(() => {
+          lastSyncedRef.current.signatureImage = signatureImage;
+        })
+        .catch(console.error);
       }
     }
-  }, [signatureImage, isInitialized, isInitialLoadComplete]);
+  }, [signatureImage, isInitialized]);
 
   useEffect(() => {
     if (isInitialized) {
@@ -162,15 +200,20 @@ export function ActProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.removeItem('stampImage');
       }
-      if (isInitialLoadComplete) {
+      
+      if (stampImage !== lastSyncedRef.current.stampImage) {
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ stampImage })
-        }).catch(console.error);
+        })
+        .then(() => {
+          lastSyncedRef.current.stampImage = stampImage;
+        })
+        .catch(console.error);
       }
     }
-  }, [stampImage, isInitialized, isInitialLoadComplete]);
+  }, [stampImage, isInitialized]);
 
   const addAct = (act: Act) => {
     setActs((prev) => [act, ...prev]);
