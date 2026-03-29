@@ -8,8 +8,7 @@ export function Settings() {
   const { 
     nextActNumber, setNextActNumber,
     signatureImage, setSignatureImage,
-    stampImage, setStampImage,
-    fetchUpds
+    stampImage, setStampImage
   } = useActContext();
   const { pushAction } = useUndo();
   const [localNumber, setLocalNumber] = useState(nextActNumber.toString());
@@ -104,11 +103,6 @@ export function Settings() {
         throw new Error(data.detail || 'Failed to restore backup');
       }
 
-      // Refresh data
-      await fetchUpds();
-      // We might need to refresh Acts too, but ActContext doesn't expose fetchActs directly in the interface I saw
-      // Actually, Registry component calls fetchActs on mount usually.
-      
       alert("База данных успешно восстановлена!");
       window.location.reload(); // Simplest way to ensure all contexts are fresh
     } catch (err) {

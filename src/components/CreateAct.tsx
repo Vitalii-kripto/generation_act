@@ -53,11 +53,15 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
   };
 
   // Extract unique values for autocomplete
-  const uniqueObjects = Array.from(new Set(acts.map(a => a.objectName).filter(Boolean)));
-  const uniqueCustomerReps = Array.from(new Set(acts.map(a => a.customerRep).filter(Boolean)));
-  const uniqueCustomerRepShorts = Array.from(new Set(acts.map(a => a.customerRepShort).filter(Boolean)));
-  const uniqueSupplierReps = Array.from(new Set(acts.map(a => a.supplierRep).filter(Boolean)));
-  const uniqueSupplierRepShorts = Array.from(new Set(acts.map(a => a.supplierRepShort).filter(Boolean)));
+  const { uniqueObjects, uniqueCustomerReps, uniqueCustomerRepShorts, uniqueSupplierReps, uniqueSupplierRepShorts } = React.useMemo(() => {
+    return {
+      uniqueObjects: Array.from(new Set(acts.map(a => a.objectName).filter(Boolean))),
+      uniqueCustomerReps: Array.from(new Set(acts.map(a => a.customerRep).filter(Boolean))),
+      uniqueCustomerRepShorts: Array.from(new Set(acts.map(a => a.customerRepShort).filter(Boolean))),
+      uniqueSupplierReps: Array.from(new Set(acts.map(a => a.supplierRep).filter(Boolean))),
+      uniqueSupplierRepShorts: Array.from(new Set(acts.map(a => a.supplierRepShort).filter(Boolean)))
+    };
+  }, [acts]);
 
   const matchWithSpecification = (item: Partial<ActItem>, overrideName: boolean = false, strict: boolean = false): Partial<ActItem> | null => {
     if (!item.name || !specification.length) return strict ? null : item;
