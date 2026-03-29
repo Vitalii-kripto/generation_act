@@ -48,7 +48,7 @@ def find_free_port(start_port: int, host: str = "127.0.0.1", max_tries: int = 20
             return port
     raise RuntimeError(f"Не удалось найти свободный порт, начиная с {start_port}")
 
-def stream_process_output(process: subprocess.Popen, prefix: str):
+def stream_process_output(process: subprocess.Popen, prefix: str, ready_event: threading.Event = None, ready_substring: str = None):
     if process.stdout is None:
         return
     try:
@@ -56,6 +56,10 @@ def stream_process_output(process: subprocess.Popen, prefix: str):
             line = line.rstrip()
             # Print to console with prefix
             print(f"[{prefix}] {line}")
+            
+            if ready_event and ready_substring and ready_substring in line:
+                ready_event.set()
+
             # Write to file with prefix and timestamp
             try:
                 with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -165,6 +169,7 @@ def main() -> None:
     env["VITE_BACKEND_URL"] = f"http://{backend_host}:{backend_port}"
     env["LOG_MODE"] = "a"
     env["RUN_DEV"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
 
     logger.info("=" * 72)
     logger.info(f"Переменные окружения:")
@@ -173,6 +178,7 @@ def main() -> None:
     logger.info(f"  FRONTEND_HOST: {env['FRONTEND_HOST']}")
     logger.info(f"  FRONTEND_PORT: {env['FRONTEND_PORT']}")
     logger.info(f"  VITE_BACKEND_URL: {env['VITE_BACKEND_URL']}")
+    logger.info(f"  PYTHONIOENCODING: {env['PYTHONIOENCODING']}")
     logger.info("=" * 72)
 
     python_exe = sys.executable
@@ -191,6 +197,7 @@ def main() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
             bufsize=1,
         )
     except Exception as e:
@@ -212,6 +219,8 @@ def main() -> None:
     logger.info(f"Команда запуска фронтенда: {' '.join(frontend_cmd)}")
     logger.info(f"CWD для фронтенда: {ROOT}")
     
+    frontend_ready_event = threading.Event()
+    
     try:
         frontend_process = subprocess.Popen(
             frontend_cmd,
@@ -220,6 +229,7 @@ def main() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
             bufsize=1,
             shell=False,
         )
@@ -228,18 +238,25 @@ def main() -> None:
         backend_process.terminate()
         sys.exit(1)
 
-    t2 = threading.Thread(target=stream_process_output, args=(frontend_process, "FRONTEND"), daemon=True)
+    t2 = threading.Thread(target=stream_process_output, args=(frontend_process, "FRONTEND", frontend_ready_event, "ready in"), daemon=True)
     t2.start()
 
     # Wait for frontend to be ready
     frontend_url = f"http://{frontend_host}:{frontend_port}"
     logger.info(f"Ожидание запуска фронтенда по адресу {frontend_url}...")
-    if not wait_for_http(frontend_url, timeout=60, prefix="FRONTEND"):
-        logger.error("Фронтенд не ответил вовремя. Завершение работы.")
-        backend_process.terminate()
-        frontend_process.terminate()
-        sys.exit(1)
-    logger.info("Фронтенд успешно запущен и доступен.")
+    
+    # Wait for the "ready in" string in stdout OR fallback to HTTP check if it takes too long
+    is_ready = frontend_ready_event.wait(timeout=60)
+    
+    if not is_ready:
+        # Fallback to HTTP check just in case the stdout format changed
+        if not wait_for_http(frontend_url, timeout=10, prefix="FRONTEND"):
+            logger.error("Фронтенд не ответил вовремя. Завершение работы.")
+            backend_process.terminate()
+            frontend_process.terminate()
+            sys.exit(1)
+            
+    logger.info("Фронтенд успешно запущен и доступен (Vite ready).")
 
     try:
         logger.info(f"Открытие браузера по адресу {frontend_url}")
