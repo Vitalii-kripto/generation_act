@@ -31,40 +31,66 @@ export function ActProvider({ children }: { children: ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    // Load data from localStorage after initial render to avoid blocking
-    try {
-      const savedSpec = localStorage.getItem('specification');
-      if (savedSpec) setSpecificationState(JSON.parse(savedSpec));
-    } catch (e) {
-      console.error("Failed to parse specification from localStorage", e);
-      localStorage.removeItem('specification');
-    }
+    const loadSettings = async () => {
+      try {
+        const response = await fetch('/api/settings');
+        if (response.ok) {
+          const data = await response.json();
+          
+          if (data.specification) {
+            setSpecificationState(data.specification);
+          } else {
+            // Fallback to localStorage
+            const savedSpec = localStorage.getItem('specification');
+            if (savedSpec) setSpecificationState(JSON.parse(savedSpec));
+          }
 
-    try {
-      const savedNum = localStorage.getItem('nextActNumber');
-      if (savedNum) setNextActNumberState(parseInt(savedNum, 10));
-    } catch (e) {
-      console.error("Failed to parse nextActNumber from localStorage", e);
-      localStorage.removeItem('nextActNumber');
-    }
+          if (data.nextActNumber) {
+            setNextActNumberState(parseInt(data.nextActNumber, 10));
+          } else {
+            const savedNum = localStorage.getItem('nextActNumber');
+            if (savedNum) setNextActNumberState(parseInt(savedNum, 10));
+          }
 
-    try {
-      const savedSig = localStorage.getItem('signatureImage');
-      if (savedSig) setSignatureImageState(savedSig);
-    } catch (e) {
-      console.error("Failed to load signatureImage from localStorage", e);
-      localStorage.removeItem('signatureImage');
-    }
+          if (data.signatureImage) {
+            setSignatureImageState(data.signatureImage);
+          } else {
+            const savedSig = localStorage.getItem('signatureImage');
+            if (savedSig) setSignatureImageState(savedSig);
+          }
 
-    try {
-      const savedStamp = localStorage.getItem('stampImage');
-      if (savedStamp) setStampImageState(savedStamp);
-    } catch (e) {
-      console.error("Failed to load stampImage from localStorage", e);
-      localStorage.removeItem('stampImage');
-    }
-    
-    setIsInitialized(true);
+          if (data.stampImage) {
+            setStampImageState(data.stampImage);
+          } else {
+            const savedStamp = localStorage.getItem('stampImage');
+            if (savedStamp) setStampImageState(savedStamp);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch settings from backend:', error);
+        // Fallback to localStorage on error
+        try {
+          const savedSpec = localStorage.getItem('specification');
+          if (savedSpec) setSpecificationState(JSON.parse(savedSpec));
+        } catch (e) {}
+        try {
+          const savedNum = localStorage.getItem('nextActNumber');
+          if (savedNum) setNextActNumberState(parseInt(savedNum, 10));
+        } catch (e) {}
+        try {
+          const savedSig = localStorage.getItem('signatureImage');
+          if (savedSig) setSignatureImageState(savedSig);
+        } catch (e) {}
+        try {
+          const savedStamp = localStorage.getItem('stampImage');
+          if (savedStamp) setStampImageState(savedStamp);
+        } catch (e) {}
+      } finally {
+        setIsInitialized(true);
+      }
+    };
+
+    loadSettings();
   }, []);
 
   const fetchActs = async () => {
@@ -86,14 +112,54 @@ export function ActProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem('nextActNumber', nextActNumber.toString());
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextActNumber })
+      }).catch(console.error);
     }
   }, [nextActNumber, isInitialized]);
 
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem('specification', JSON.stringify(specification));
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ specification })
+      }).catch(console.error);
     }
   }, [specification, isInitialized]);
+
+  useEffect(() => {
+    if (isInitialized) {
+      if (signatureImage) {
+        localStorage.setItem('signatureImage', signatureImage);
+      } else {
+        localStorage.removeItem('signatureImage');
+      }
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signatureImage })
+      }).catch(console.error);
+    }
+  }, [signatureImage, isInitialized]);
+
+  useEffect(() => {
+    if (isInitialized) {
+      if (stampImage) {
+        localStorage.setItem('stampImage', stampImage);
+      } else {
+        localStorage.removeItem('stampImage');
+      }
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stampImage })
+      }).catch(console.error);
+    }
+  }, [stampImage, isInitialized]);
 
   const addAct = (act: Act) => {
     setActs((prev) => [act, ...prev]);
@@ -257,20 +323,10 @@ export function ActProvider({ children }: { children: ReactNode }) {
 
   const setSignatureImage = (img: string | null) => {
     setSignatureImageState(img);
-    if (img) {
-      localStorage.setItem('signatureImage', img);
-    } else {
-      localStorage.removeItem('signatureImage');
-    }
   };
 
   const setStampImage = (img: string | null) => {
     setStampImageState(img);
-    if (img) {
-      localStorage.setItem('stampImage', img);
-    } else {
-      localStorage.removeItem('stampImage');
-    }
   };
 
   const setSpecification = (spec: SpecificationItem[]) => {

@@ -203,6 +203,13 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
                 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+                
         conn.commit()
         conn.close()
         logger.info("Database initialized successfully")
@@ -1513,6 +1520,53 @@ async def import_backup(file: UploadFile = File(...)):
         logger.error(f"Error importing backup: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/settings")
+async def get_settings():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM settings")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        settings = {}
+        for key, value in rows:
+            try:
+                # Попытка распарсить JSON (например, для specification)
+                settings[key] = json.loads(value)
+            except json.JSONDecodeError:
+                # Если не JSON, отдаем как строку
+                settings[key] = value
+                
+        return settings
+    except Exception as e:
+        logger.error(f"Error getting settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/settings")
+async def update_settings(settings: dict):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        for key, value in settings.items():
+            if value is None:
+                cursor.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                # Если значение - список или словарь, сериализуем в JSON
+                if isinstance(value, (dict, list)):
+                    val_str = json.dumps(value, ensure_ascii=False)
+                else:
+                    val_str = str(value)
+                cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, val_str))
+                
+        conn.commit()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
