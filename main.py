@@ -436,14 +436,12 @@ async def log_usage(log: UsageLog):
 async def frontend_log(log: FrontendLog):
     try:
         frontend_logger = logging.getLogger("FrontendClient")
-        payload = {
-            "source": log.source,
-            "message": log.message,
-            "context": log.context or {}
-        }
+        
+        # Format the message nicely
+        context_str = f" | Context: {json.dumps(log.context, ensure_ascii=False)}" if log.context else ""
+        text = f"[{log.source}] {log.message}{context_str}"
 
         level = (log.level or "info").lower()
-        text = json.dumps(payload, ensure_ascii=False)
 
         if level == "debug":
             frontend_logger.debug(text)

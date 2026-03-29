@@ -330,7 +330,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
 
               await fetch("/api/frontend-log", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json; charset=utf-8" },
                 body: JSON.stringify({
                   level: "error",
                   source: "CreateAct",
@@ -361,7 +361,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
 
           await fetch("/api/frontend-log", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json; charset=utf-8" },
             body: JSON.stringify({
               level: "error",
               source: "CreateAct",
