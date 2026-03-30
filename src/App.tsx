@@ -12,7 +12,6 @@ import { Registry } from './components/Registry';
 import { UpdRegistry } from './components/UpdRegistry';
 import { ProfitRegistry } from './components/ProfitRegistry';
 import { Settings } from './components/Settings';
-import { SpecificationSettings } from './components/SpecificationSettings';
 import { ActPrintView } from './components/ActPrintView';
 import { FileText, List, Settings as SettingsIcon, Database, TrendingUp } from 'lucide-react';
 import { Act } from './types';
@@ -27,6 +26,11 @@ function AppContent() {
     return <ActPrintView act={viewingAct} onBack={() => setViewingAct(null)} />;
   }
 
+  const getTabContainerClass = (tab: 'create' | 'registry' | 'updRegistry' | 'profit' | 'settings') =>
+    activeTab === tab
+      ? 'block'
+      : 'absolute -left-[100000px] top-0 w-full h-0 overflow-hidden';
+
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto">
@@ -39,7 +43,10 @@ function AppContent() {
           <div className="border-b border-gray-200">
             <nav className="-mb-px flex space-x-8 px-6 overflow-x-auto" aria-label="Tabs">
               <button
-                onClick={() => { setActiveTab('create'); setEditingAct(null); }}
+                onClick={() => {
+                  setActiveTab('create');
+                  setEditingAct(null);
+                }}
                 className={`${
                   activeTab === 'create' && !editingAct
                     ? 'border-blue-500 text-blue-600'
@@ -49,6 +56,7 @@ function AppContent() {
                 <FileText className="w-5 h-5 mr-2" />
                 Создать Акт
               </button>
+
               {editingAct && (
                 <button
                   onClick={() => setActiveTab('create')}
@@ -58,8 +66,12 @@ function AppContent() {
                   Редактирование
                 </button>
               )}
+
               <button
-                onClick={() => { setActiveTab('registry'); setEditingAct(null); }}
+                onClick={() => {
+                  setActiveTab('registry');
+                  setEditingAct(null);
+                }}
                 className={`${
                   activeTab === 'registry'
                     ? 'border-blue-500 text-blue-600'
@@ -69,8 +81,12 @@ function AppContent() {
                 <List className="w-5 h-5 mr-2" />
                 Реестр Актов
               </button>
+
               <button
-                onClick={() => { setActiveTab('updRegistry'); setEditingAct(null); }}
+                onClick={() => {
+                  setActiveTab('updRegistry');
+                  setEditingAct(null);
+                }}
                 className={`${
                   activeTab === 'updRegistry'
                     ? 'border-blue-500 text-blue-600'
@@ -80,8 +96,12 @@ function AppContent() {
                 <Database className="w-5 h-5 mr-2" />
                 Реестр УПД
               </button>
+
               <button
-                onClick={() => { setActiveTab('profit'); setEditingAct(null); }}
+                onClick={() => {
+                  setActiveTab('profit');
+                  setEditingAct(null);
+                }}
                 className={`${
                   activeTab === 'profit'
                     ? 'border-blue-500 text-blue-600'
@@ -91,8 +111,12 @@ function AppContent() {
                 <TrendingUp className="w-5 h-5 mr-2" />
                 Прибыль
               </button>
+
               <button
-                onClick={() => { setActiveTab('settings'); setEditingAct(null); }}
+                onClick={() => {
+                  setActiveTab('settings');
+                  setEditingAct(null);
+                }}
                 className={`${
                   activeTab === 'settings'
                     ? 'border-blue-500 text-blue-600'
@@ -106,30 +130,43 @@ function AppContent() {
           </div>
         </div>
 
-        <main>
-          {activeTab === 'create' && !editingAct && <CreateAct onCreated={(act) => setViewingAct(act)} />}
-          {activeTab === 'create' && editingAct && (
-            <CreateAct 
-              initialAct={editingAct} 
-              onUpdate={(act) => {
-                updateAct(act.id, act);
-                setEditingAct(null);
-                setActiveTab('registry');
-              }} 
-            />
-          )}
-          {activeTab === 'registry' && (
-            <Registry 
-              onViewAct={(act) => setViewingAct(act)} 
+        <main className="relative">
+          <div className={getTabContainerClass('create')} aria-hidden={activeTab !== 'create'}>
+            {!editingAct ? (
+              <CreateAct onCreated={(act) => setViewingAct(act)} />
+            ) : (
+              <CreateAct
+                initialAct={editingAct}
+                onUpdate={(act) => {
+                  updateAct(act.id, act);
+                  setEditingAct(null);
+                  setActiveTab('registry');
+                }}
+              />
+            )}
+          </div>
+
+          <div className={getTabContainerClass('registry')} aria-hidden={activeTab !== 'registry'}>
+            <Registry
+              onViewAct={(act) => setViewingAct(act)}
               onEditAct={(act) => {
                 setEditingAct(act);
                 setActiveTab('create');
               }}
             />
-          )}
-          {activeTab === 'updRegistry' && <UpdRegistry />}
-          {activeTab === 'profit' && <ProfitRegistry />}
-          {activeTab === 'settings' && <Settings />}
+          </div>
+
+          <div className={getTabContainerClass('updRegistry')} aria-hidden={activeTab !== 'updRegistry'}>
+            <UpdRegistry />
+          </div>
+
+          <div className={getTabContainerClass('profit')} aria-hidden={activeTab !== 'profit'}>
+            <ProfitRegistry />
+          </div>
+
+          <div className={getTabContainerClass('settings')} aria-hidden={activeTab !== 'settings'}>
+            <Settings />
+          </div>
         </main>
       </div>
     </div>
