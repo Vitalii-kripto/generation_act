@@ -156,6 +156,7 @@ def init_db():
                 isPaid BOOLEAN DEFAULT 0,
                 purchaseAmountGross REAL DEFAULT 0,
                 transportAmountGross REAL DEFAULT 0,
+                includeInProfit BOOLEAN DEFAULT 1,
                 createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -201,7 +202,8 @@ def init_db():
         upds_columns_to_add = [
             ("isPaid", "BOOLEAN DEFAULT 0"),
             ("purchaseAmountGross", "REAL DEFAULT 0"),
-            ("transportAmountGross", "REAL DEFAULT 0")
+            ("transportAmountGross", "REAL DEFAULT 0"),
+            ("includeInProfit", "BOOLEAN DEFAULT 1")
         ]
         for col_name, col_type in upds_columns_to_add:
             try:
@@ -319,6 +321,7 @@ class Upd(BaseModel):
     isPaid: Optional[bool] = False
     purchaseAmountGross: Optional[float] = 0.0
     transportAmountGross: Optional[float] = 0.0
+    includeInProfit: Optional[bool] = True
     createdAt: Optional[str] = None
 
 class UpdResponse(Upd):
@@ -453,6 +456,7 @@ def enrich_profit_fields(upd: dict) -> dict:
 
     upd["purchaseAmountGross"] = round2(purchase_gross)
     upd["transportAmountGross"] = round2(transport_gross)
+    upd["includeInProfit"] = bool(upd.get("includeInProfit", True))
     upd["shipmentWithoutVat"] = shipment_without_vat
     upd["purchaseWithoutVat"] = purchase_without_vat
     upd["transportWithoutVat"] = transport_without_vat
@@ -594,6 +598,7 @@ async def get_upds():
                 upd['isPaid'] = bool(upd.get('isPaid', False))
                 upd['purchaseAmountGross'] = float(upd.get('purchaseAmountGross') or 0)
                 upd['transportAmountGross'] = float(upd.get('transportAmountGross') or 0)
+                upd['includeInProfit'] = bool(upd.get('includeInProfit', True))
 
                 dates_info = calculate_upd_dates(upd['updDate'])
                 upd.update(dates_info)
@@ -628,8 +633,8 @@ async def create_upd(upd: Upd, overwrite: bool = False):
                 INSERT INTO upds (
                     id, updNumber, updDate, supplierName, customerName, items,
                     totalAmount, vatAmount, vatRate, source, isUsedInAct, isPaid,
-                    purchaseAmountGross, transportAmountGross
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    purchaseAmountGross, transportAmountGross, includeInProfit
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 upd.id, upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
                 json.dumps([dump_model(item) for item in upd.items]),
@@ -637,7 +642,8 @@ async def create_upd(upd: Upd, overwrite: bool = False):
                 1 if upd.isUsedInAct else 0,
                 1 if upd.isPaid else 0,
                 float(upd.purchaseAmountGross or 0),
-                float(upd.transportAmountGross or 0)
+                float(upd.transportAmountGross or 0),
+                1 if upd.includeInProfit else 0
             ))
             conn.commit()
             
@@ -662,7 +668,7 @@ async def update_upd(id: str, upd: Upd):
                     updNumber = ?, updDate = ?, supplierName = ?, customerName = ?,
                     items = ?, totalAmount = ?, vatAmount = ?, vatRate = ?,
                     source = ?, isUsedInAct = ?, isPaid = ?,
-                    purchaseAmountGross = ?, transportAmountGross = ?
+                    purchaseAmountGross = ?, transportAmountGross = ?, includeInProfit = ?
                 WHERE id = ?
             ''', (
                 upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
@@ -672,6 +678,7 @@ async def update_upd(id: str, upd: Upd):
                 1 if upd.isPaid else 0,
                 float(upd.purchaseAmountGross or 0),
                 float(upd.transportAmountGross or 0),
+                1 if upd.includeInProfit else 0,
                 id
             ))
             conn.commit()

@@ -68,6 +68,7 @@ export interface UpdResponse {
 
   purchaseAmountGross?: number;
   transportAmountGross?: number;
+  includeInProfit?: boolean;
 
   shipmentWithoutVat: number;
   purchaseWithoutVat: number;
