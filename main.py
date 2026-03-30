@@ -1486,13 +1486,13 @@ async def generate_docx_from_data(act_data: Act):
         # Контент подписей
         cells = sig_table.rows[1].cells
         
-        # Заказчик
+        # Заказчик — внизу документа только краткое наименование, без скобок
         p_cust = cells[0].paragraphs[0]
-        p_cust.add_run(f"{act['customerName']} ({act['customerShortName']})\n\n\n________________ / {act['customerRepShort']} /\nМ.П.")
-        
-        # Поставщик
+        p_cust.add_run(f"{act['customerShortName']}\n\n\n________________ / {act['customerRepShort']} /\nМ.П.")
+
+        # Поставщик — внизу документа только краткое наименование, без скобок
         p_supp = cells[1].paragraphs[0]
-        p_supp.add_run(f"{act['supplierName']} ({act['supplierShortName']})\n\n")
+        p_supp.add_run(f"{act['supplierShortName']}\n\n")
         
         # Подпись и печать Поставщика: плавающие изображения "за текстом"
         has_sig = bool(act.get('signatureImage'))
