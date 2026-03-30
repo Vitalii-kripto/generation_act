@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { Act, SpecificationItem } from '../types';
 
 interface ActContextType {
@@ -18,6 +18,13 @@ interface ActContextType {
   setStampImage: (img: string | null) => void;
   specification: SpecificationItem[];
   setSpecification: (spec: SpecificationItem[]) => void;
+}
+
+interface SyncedSettings {
+  specification?: string;
+  nextActNumber?: number;
+  signatureImage?: string | null;
+  stampImage?: string | null;
 }
 
 const ActContext = createContext<ActContextType | undefined>(undefined);
@@ -43,12 +50,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem('stampImage');
   });
   const [isInitialized, setIsInitialized] = useState(false);
-  const lastSyncedRef = React.useRef<{
-    specification?: string;
-    nextActNumber?: number;
-    signatureImage?: string | null;
-    stampImage?: string | null;
-  }>(() => {
+  const lastSyncedRef = useRef<SyncedSettings>((() => {
     // Initialize ref with current localStorage values to prevent immediate sync if they match
     const spec = localStorage.getItem('specification') || '[]';
     const num = parseInt(localStorage.getItem('nextActNumber') || '1', 10);
@@ -60,7 +62,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
       signatureImage: sig,
       stampImage: stamp
     };
-  }());
+  })());
 
   useEffect(() => {
     const loadSettings = async () => {
