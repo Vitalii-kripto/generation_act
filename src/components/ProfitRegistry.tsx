@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useUpdContext } from '../store/UpdContext';
-import { Search, Save, TrendingUp } from 'lucide-react';
+import { Search, Save, TrendingUp, Download } from 'lucide-react';
 import { UpdResponse } from '../types';
 
 type DraftMap = Record<
@@ -69,7 +69,10 @@ export function ProfitRegistry() {
       let result = 0;
 
       if (sortField === 'updNumber') {
-        result = a.updNumber.localeCompare(b.updNumber, 'ru', { numeric: true, sensitivity: 'base' });
+        result = a.updNumber.localeCompare(b.updNumber, 'ru', {
+          numeric: true,
+          sensitivity: 'base',
+        });
       } else if (sortField === 'updDate') {
         result = parseRuDate(a.updDate) - parseRuDate(b.updDate);
       }
@@ -155,6 +158,48 @@ export function ProfitRegistry() {
     }
   };
 
+  const handleIncludeToggle = async (upd: UpdResponse, checked: boolean) => {
+    const currentDraft = drafts[upd.id] || {
+      purchaseAmountGross: upd.purchaseAmountGross || 0,
+      transportAmountGross: upd.transportAmountGross || 0,
+      includeInProfit: upd.includeInProfit !== false,
+    };
+
+    const updatedDraft = {
+      ...currentDraft,
+      includeInProfit: checked,
+    };
+
+    setDrafts((prev) => ({
+      ...prev,
+      [upd.id]: updatedDraft,
+    }));
+
+    try {
+      setSavingId(upd.id);
+      await updateUpd(upd.id, {
+        ...upd,
+        purchaseAmountGross: updatedDraft.purchaseAmountGross || 0,
+        transportAmountGross: updatedDraft.transportAmountGross || 0,
+        includeInProfit: updatedDraft.includeInProfit,
+      });
+    } catch (error) {
+      console.error('Failed to save includeInProfit:', error);
+      alert('Ошибка сохранения галочки учета');
+      setDrafts((prev) => ({
+        ...prev,
+        [upd.id]: currentDraft,
+      }));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const exportProfitReport = () => {
+    const url = `/api/profit/export?onlyPaid=${onlyPaid ? 'true' : 'false'}`;
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden">
       <div className="p-6 border-b border-gray-200 flex flex-col gap-4">
@@ -164,15 +209,25 @@ export function ProfitRegistry() {
             Расчёт прибыли
           </h2>
 
-          <div className="relative">
-            <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Поиск по УПД..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full md:w-72"
-            />
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative">
+              <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Поиск по УПД..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full md:w-72"
+              />
+            </div>
+
+            <button
+              onClick={exportProfitReport}
+              className="inline-flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Экспорт в Excel
+            </button>
           </div>
         </div>
 
@@ -266,9 +321,8 @@ export function ProfitRegistry() {
                     <input
                       type="checkbox"
                       checked={draft.includeInProfit}
-                      onChange={(e) =>
-                        setDraftField(upd.id, 'includeInProfit', e.target.checked)
-                      }
+                      onChange={(e) => handleIncludeToggle(upd, e.target.checked)}
+                      disabled={savingId === upd.id}
                       className="w-4 h-4 text-blue-600 border-gray-300 rounded"
                     />
                   </td>

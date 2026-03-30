@@ -1648,6 +1648,147 @@ async def delete_act(act_id: str):
         logger.error(f"Error deleting act: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/profit/export")
+async def export_profit_report(onlyPaid: bool = False):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM upds")
+            rows = cursor.fetchall()
+
+            upds_list = []
+            for row in rows:
+                upd = dict(row)
+                upd['isPaid'] = bool(upd.get('isPaid', False))
+                upd['includeInProfit'] = bool(upd.get('includeInProfit', True))
+                upd['purchaseAmountGross'] = float(upd.get('purchaseAmountGross') or 0)
+                upd['transportAmountGross'] = float(upd.get('transportAmountGross') or 0)
+
+                # Исключаем все строки, не участвующие в расчётах
+                if not upd['includeInProfit']:
+                    continue
+                if onlyPaid and not upd['isPaid']:
+                    continue
+
+                upd = enrich_profit_fields(upd)
+                upds_list.append(upd)
+
+            def sort_key(u):
+                date_str = u.get('updDate', '')
+                try:
+                    parts = date_str.split('.')
+                    if len(parts) == 3:
+                        date_val = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                    else:
+                        date_val = "0000-00-00"
+                except Exception:
+                    date_val = "0000-00-00"
+                return (date_val, u.get('updNumber', ''))
+
+            upds_list.sort(key=sort_key)
+
+            total_shipment = sum(u['shipmentWithoutVat'] for u in upds_list)
+            total_purchase = sum(u['purchaseWithoutVat'] for u in upds_list)
+            total_transport = sum(u['transportWithoutVat'] for u in upds_list)
+            total_profit = sum(u['profitWithoutVat'] for u in upds_list)
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Прибыль по УПД"
+
+            report_date = datetime.now().strftime("%d.%m.%Y %H:%M")
+            filter_text = "Только оплаченные" if onlyPaid else "Все включенные в расчет"
+            ws.merge_cells('A1:J1')
+            title_cell = ws.cell(row=1, column=1, value=f"Отчет по прибыли УПД (от {report_date})")
+            title_cell.font = Font(bold=True, size=14)
+            title_cell.alignment = Alignment(horizontal='center')
+
+            ws.cell(row=3, column=1, value="Режим отбора:").font = Font(bold=True)
+            ws.cell(row=3, column=2, value=filter_text)
+
+            ws.cell(row=4, column=1, value="Общая отгрузка без НДС:").font = Font(bold=True)
+            ws.cell(row=4, column=2, value=total_shipment).number_format = '#,##0.00'
+
+            ws.cell(row=5, column=1, value="Общая закупка без НДС:").font = Font(bold=True)
+            ws.cell(row=5, column=2, value=total_purchase).number_format = '#,##0.00'
+
+            ws.cell(row=6, column=1, value="Общий транспорт без НДС:").font = Font(bold=True)
+            ws.cell(row=6, column=2, value=total_transport).number_format = '#,##0.00'
+
+            ws.cell(row=7, column=1, value="Итоговая общая прибыль без НДС:").font = Font(bold=True)
+            ws.cell(row=7, column=2, value=total_profit).number_format = '#,##0.00'
+
+            headers = [
+                "Номер УПД",
+                "Дата УПД",
+                "Оплачено",
+                "Отгрузка с НДС",
+                "Отгрузка без НДС",
+                "Закупка с НДС",
+                "Закупка без НДС",
+                "Транспорт с НДС",
+                "Транспорт без НДС",
+                "Прибыль без НДС",
+            ]
+
+            header_row = 9
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=header_row, column=col_idx, value=header)
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+
+            for row_idx, upd in enumerate(upds_list, start=10):
+                ws.cell(row=row_idx, column=1, value=upd['updNumber'])
+                ws.cell(row=row_idx, column=2, value=upd['updDate'])
+                ws.cell(row=row_idx, column=3, value="Да" if upd['isPaid'] else "Нет")
+
+                ws.cell(row=row_idx, column=4, value=upd['totalAmount']).number_format = '#,##0.00'
+                ws.cell(row=row_idx, column=5, value=upd['shipmentWithoutVat']).number_format = '#,##0.00'
+                ws.cell(row=row_idx, column=6, value=upd['purchaseAmountGross']).number_format = '#,##0.00'
+                ws.cell(row=row_idx, column=7, value=upd['purchaseWithoutVat']).number_format = '#,##0.00'
+                ws.cell(row=row_idx, column=8, value=upd['transportAmountGross']).number_format = '#,##0.00'
+                ws.cell(row=row_idx, column=9, value=upd['transportWithoutVat']).number_format = '#,##0.00'
+                ws.cell(row=row_idx, column=10, value=upd['profitWithoutVat']).number_format = '#,##0.00'
+
+            total_row = len(upds_list) + 11
+            ws.cell(row=total_row, column=1, value="ИТОГО").font = Font(bold=True)
+            ws.cell(row=total_row, column=5, value=total_shipment).font = Font(bold=True)
+            ws.cell(row=total_row, column=5).number_format = '#,##0.00'
+            ws.cell(row=total_row, column=7, value=total_purchase).font = Font(bold=True)
+            ws.cell(row=total_row, column=7).number_format = '#,##0.00'
+            ws.cell(row=total_row, column=9, value=total_transport).font = Font(bold=True)
+            ws.cell(row=total_row, column=9).number_format = '#,##0.00'
+            ws.cell(row=total_row, column=10, value=total_profit).font = Font(bold=True)
+            ws.cell(row=total_row, column=10).number_format = '#,##0.00'
+
+            for column_cells in ws.columns:
+                max_length = 0
+                column_idx = column_cells[0].column
+                column_letter = get_column_letter(column_idx)
+
+                for cell in column_cells:
+                    if hasattr(cell, 'value') and cell.value is not None:
+                        try:
+                            max_length = max(max_length, len(str(cell.value)))
+                        except Exception:
+                            pass
+
+                ws.column_dimensions[column_letter].width = max_length + 2
+
+            fd, path = tempfile.mkstemp(suffix=".xlsx")
+            os.close(fd)
+            wb.save(path)
+
+            return FileResponse(
+                path,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename="profit_report.xlsx"
+            )
+    except Exception as e:
+        logger.error(f"Error exporting profit report: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/backup/export")
 async def export_backup():
     if not os.path.exists(DB_PATH):
