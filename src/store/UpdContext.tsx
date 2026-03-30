@@ -1,13 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { UpdResponse } from '../types';
+import { UpdResponse, UpdCreate } from '../types';
 
 interface UpdContextType {
   upds: UpdResponse[];
   loading: boolean;
   error: string | null;
   fetchUpds: () => Promise<void>;
-  createUpd: (upd: Omit<UpdResponse, 'acceptanceDate' | 'paymentDate' | 'daysUntilPayment' | 'status'>, overwrite?: boolean) => Promise<UpdResponse>;
-  updateUpd: (id: string, upd: Omit<UpdResponse, 'acceptanceDate' | 'paymentDate' | 'daysUntilPayment' | 'status'>) => Promise<UpdResponse>;
+  createUpd: (upd: UpdCreate, overwrite?: boolean) => Promise<UpdResponse>;
+  updateUpd: (id: string, upd: UpdCreate) => Promise<UpdResponse>;
   deleteUpd: (id: string) => Promise<UpdResponse | undefined>;
   exportUpds: () => void;
 }

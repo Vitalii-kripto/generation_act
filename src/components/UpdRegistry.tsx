@@ -3,7 +3,7 @@ import { useUpdContext } from '../store/UpdContext';
 import { useUndo } from '../store/UndoContext';
 import { useActContext } from '../store/ActContext';
 import { Download, Search, Trash2, CheckCircle, AlertTriangle, XCircle, FileText, Upload, Loader2, ChevronDown, ChevronUp, Paperclip, AlertCircle } from 'lucide-react';
-import { UpdResponse } from '../types';
+import { UpdResponse, UpdCreate } from '../types';
 import { extractDataFromUPD } from '../services/geminiService';
 import { normalizeDate } from '../utils/dateUtils';
 import { AttachmentsManager } from './AttachmentsManager';
@@ -104,7 +104,7 @@ export function UpdRegistry() {
             throw new Error(`Неверный покупатель: "${data.customerName || 'не определен'}". Должен быть АО "ТСК" или Акционерное общество «ТОННЕЛЬСТРОЙКОМПЛЕКТ»`);
           }
           
-          const updToSave = {
+          const updToSave: UpdCreate = {
             id: crypto.randomUUID(),
             updNumber: data.updNumber || 'Б/Н',
             updDate: normalizeDate(data.updDate || ''),

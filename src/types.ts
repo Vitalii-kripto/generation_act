@@ -65,12 +65,23 @@ export interface UpdResponse {
   isUsedInAct?: boolean;
   isPaid?: boolean;
   createdAt?: string;
+
+  purchaseAmountGross?: number;
+  transportAmountGross?: number;
+
+  shipmentWithoutVat: number;
+  purchaseWithoutVat: number;
+  transportWithoutVat: number;
+  profitWithoutVat: number;
+
   acceptanceDate: string;
   paymentDate: string;
   daysUntilPayment: number;
   status: 'green' | 'yellow' | 'red';
   attachmentsCount?: number;
 }
+
+export type UpdCreate = Omit<UpdResponse, 'acceptanceDate' | 'paymentDate' | 'daysUntilPayment' | 'status' | 'shipmentWithoutVat' | 'purchaseWithoutVat' | 'transportWithoutVat' | 'profitWithoutVat'>;
 
 
 export interface Act {

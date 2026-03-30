@@ -153,6 +153,9 @@ def init_db():
                 vatRate REAL,
                 source TEXT,
                 isUsedInAct BOOLEAN DEFAULT 0,
+                isPaid BOOLEAN DEFAULT 0,
+                purchaseAmountGross REAL DEFAULT 0,
+                transportAmountGross REAL DEFAULT 0,
                 createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -196,7 +199,9 @@ def init_db():
                 
         # Миграция для таблицы upds
         upds_columns_to_add = [
-            ("isPaid", "BOOLEAN DEFAULT 0")
+            ("isPaid", "BOOLEAN DEFAULT 0"),
+            ("purchaseAmountGross", "REAL DEFAULT 0"),
+            ("transportAmountGross", "REAL DEFAULT 0")
         ]
         for col_name, col_type in upds_columns_to_add:
             try:
@@ -312,6 +317,8 @@ class Upd(BaseModel):
     source: Optional[str] = None
     isUsedInAct: Optional[bool] = False
     isPaid: Optional[bool] = False
+    purchaseAmountGross: Optional[float] = 0.0
+    transportAmountGross: Optional[float] = 0.0
     createdAt: Optional[str] = None
 
 class UpdResponse(Upd):
@@ -320,6 +327,10 @@ class UpdResponse(Upd):
     daysUntilPayment: int
     status: str
     attachmentsCount: Optional[int] = 0
+    shipmentWithoutVat: float
+    purchaseWithoutVat: float
+    transportWithoutVat: float
+    profitWithoutVat: float
 
 ru_holidays = holidays.RU(years=range(2020, 2030))
 
@@ -421,6 +432,32 @@ def calculate_upd_dates(upd_date_str: str):
         "daysUntilPayment": days_until_payment,
         "status": status
     }
+
+def round2(value: float) -> float:
+    return round(float(value or 0), 2)
+
+def without_vat_22(gross_value: float) -> float:
+    return round2((float(gross_value or 0)) / 1.22)
+
+def enrich_profit_fields(upd: dict) -> dict:
+    total_amount = float(upd.get("totalAmount") or 0)
+    purchase_gross = float(upd.get("purchaseAmountGross") or 0)
+    transport_gross = float(upd.get("transportAmountGross") or 0)
+
+    shipment_without_vat = without_vat_22(total_amount)
+    purchase_without_vat = without_vat_22(purchase_gross)
+    transport_without_vat = without_vat_22(transport_gross)
+    profit_without_vat = round2(
+        shipment_without_vat - purchase_without_vat - transport_without_vat
+    )
+
+    upd["purchaseAmountGross"] = round2(purchase_gross)
+    upd["transportAmountGross"] = round2(transport_gross)
+    upd["shipmentWithoutVat"] = shipment_without_vat
+    upd["purchaseWithoutVat"] = purchase_without_vat
+    upd["transportWithoutVat"] = transport_without_vat
+    upd["profitWithoutVat"] = profit_without_vat
+    return upd
 
 @app.get("/api/health")
 async def health_check():
@@ -550,14 +587,18 @@ async def get_upds():
             for row in rows:
                 upd = dict(row)
                 upd['items'] = json.loads(upd['items'])
-                
-                # Dynamically calculate isUsedInAct
+
                 is_used = (upd['updNumber'], upd['updDate']) in used_upds
                 upd['isUsedInAct'] = is_used
-                
+
                 upd['isPaid'] = bool(upd.get('isPaid', False))
+                upd['purchaseAmountGross'] = float(upd.get('purchaseAmountGross') or 0)
+                upd['transportAmountGross'] = float(upd.get('transportAmountGross') or 0)
+
                 dates_info = calculate_upd_dates(upd['updDate'])
                 upd.update(dates_info)
+
+                upd = enrich_profit_fields(upd)
                 upds.append(upd)
             return upds
     except Exception as e:
@@ -586,20 +627,24 @@ async def create_upd(upd: Upd, overwrite: bool = False):
             cursor.execute('''
                 INSERT INTO upds (
                     id, updNumber, updDate, supplierName, customerName, items,
-                    totalAmount, vatAmount, vatRate, source, isUsedInAct, isPaid
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    totalAmount, vatAmount, vatRate, source, isUsedInAct, isPaid,
+                    purchaseAmountGross, transportAmountGross
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 upd.id, upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
                 json.dumps([dump_model(item) for item in upd.items]),
                 upd.totalAmount, upd.vatAmount, upd.vatRate, upd.source,
                 1 if upd.isUsedInAct else 0,
-                1 if upd.isPaid else 0
+                1 if upd.isPaid else 0,
+                float(upd.purchaseAmountGross or 0),
+                float(upd.transportAmountGross or 0)
             ))
             conn.commit()
             
             dates_info = calculate_upd_dates(upd.updDate)
             response_data = dump_model(upd)
             response_data.update(dates_info)
+            response_data = enrich_profit_fields(response_data)
             return response_data
     except HTTPException:
         raise
@@ -616,20 +661,25 @@ async def update_upd(id: str, upd: Upd):
                 UPDATE upds SET
                     updNumber = ?, updDate = ?, supplierName = ?, customerName = ?,
                     items = ?, totalAmount = ?, vatAmount = ?, vatRate = ?,
-                    source = ?, isUsedInAct = ?, isPaid = ?
+                    source = ?, isUsedInAct = ?, isPaid = ?,
+                    purchaseAmountGross = ?, transportAmountGross = ?
                 WHERE id = ?
             ''', (
                 upd.updNumber, upd.updDate, upd.supplierName, upd.customerName,
                 json.dumps([dump_model(item) for item in upd.items]),
                 upd.totalAmount, upd.vatAmount, upd.vatRate,
                 upd.source, 1 if upd.isUsedInAct else 0,
-                1 if upd.isPaid else 0, id
+                1 if upd.isPaid else 0,
+                float(upd.purchaseAmountGross or 0),
+                float(upd.transportAmountGross or 0),
+                id
             ))
             conn.commit()
             
             dates_info = calculate_upd_dates(upd.updDate)
             response_data = dump_model(upd)
             response_data.update(dates_info)
+            response_data = enrich_profit_fields(response_data)
             return response_data
     except Exception as e:
         logger.error(f"Error updating upd: {e}", exc_info=True)

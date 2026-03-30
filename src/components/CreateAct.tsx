@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useActContext } from '../store/ActContext';
 import { useUpdContext } from '../store/UpdContext';
 import { useUndo } from '../store/UndoContext';
-import { Act, ActItem, SpecificationItem, UpdResponse } from '../types';
+import { Act, ActItem, SpecificationItem, UpdResponse, UpdCreate } from '../types';
 import { Plus, Trash2, Upload, Loader2, AlertTriangle, Database, FileText } from 'lucide-react';
 import { extractDataFromUPD } from '../services/geminiService';
 import { normalizeDate } from '../utils/dateUtils';
@@ -296,7 +296,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
         try {
           const data = await extractDataFromUPD(base64String, file.type);
           
-          const updToSave = {
+          const updToSave: UpdCreate = {
             id: crypto.randomUUID(),
             updNumber: data.updNumber || '',
             updDate: normalizeDate(data.updDate || ''),
