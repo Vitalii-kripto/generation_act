@@ -498,11 +498,7 @@ export async function extractSpecificationFromPDF(
       .replace(/\n?```$/, "");
 
     const items = JSON.parse(cleanedText);
-
-    return items.map((item: any) => ({
-      ...item,
-      id: crypto.randomUUID(),
-    }));
+    return items;
   } catch (e) {
     throw new Error(
       `Ошибка обработки спецификации: ${

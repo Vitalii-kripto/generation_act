@@ -48,7 +48,19 @@ export function ActProvider({ children }: { children: ReactNode }) {
     nextActNumber?: number;
     signatureImage?: string | null;
     stampImage?: string | null;
-  }>({});
+  }>(() => {
+    // Initialize ref with current localStorage values to prevent immediate sync if they match
+    const spec = localStorage.getItem('specification') || '[]';
+    const num = parseInt(localStorage.getItem('nextActNumber') || '1', 10);
+    const sig = localStorage.getItem('signatureImage');
+    const stamp = localStorage.getItem('stampImage');
+    return {
+      specification: spec,
+      nextActNumber: num,
+      signatureImage: sig,
+      stampImage: stamp
+    };
+  }());
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -56,46 +68,36 @@ export function ActProvider({ children }: { children: ReactNode }) {
         const response = await fetch('/api/settings');
         if (response.ok) {
           const data = await response.json();
+          console.log('Settings loaded from backend:', data);
           
-          let loadedSpec = [];
           if (data.specification) {
-            loadedSpec = typeof data.specification === 'string' ? JSON.parse(data.specification) : data.specification;
+            const loadedSpec = typeof data.specification === 'string' ? JSON.parse(data.specification) : data.specification;
+            setSpecificationState(loadedSpec);
           } else {
             const savedSpec = localStorage.getItem('specification');
-            if (savedSpec) loadedSpec = JSON.parse(savedSpec);
+            if (savedSpec) setSpecificationState(JSON.parse(savedSpec));
           }
-          setSpecificationState(loadedSpec);
-          lastSyncedRef.current.specification = JSON.stringify(loadedSpec);
 
-          let loadedNum = 1;
           if (data.nextActNumber) {
-            loadedNum = parseInt(data.nextActNumber, 10);
+            setNextActNumberState(parseInt(data.nextActNumber, 10));
           } else {
             const savedNum = localStorage.getItem('nextActNumber');
-            if (savedNum) loadedNum = parseInt(savedNum, 10);
+            if (savedNum) setNextActNumberState(parseInt(savedNum, 10));
           }
-          setNextActNumberState(loadedNum);
-          lastSyncedRef.current.nextActNumber = loadedNum;
 
-          let loadedSig = null;
           if (data.signatureImage) {
-            loadedSig = data.signatureImage;
+            setSignatureImageState(data.signatureImage);
           } else {
             const savedSig = localStorage.getItem('signatureImage');
-            if (savedSig) loadedSig = savedSig;
+            if (savedSig) setSignatureImageState(savedSig);
           }
-          setSignatureImageState(loadedSig);
-          lastSyncedRef.current.signatureImage = loadedSig;
 
-          let loadedStamp = null;
           if (data.stampImage) {
-            loadedStamp = data.stampImage;
+            setStampImageState(data.stampImage);
           } else {
             const savedStamp = localStorage.getItem('stampImage');
-            if (savedStamp) loadedStamp = savedStamp;
+            if (savedStamp) setStampImageState(savedStamp);
           }
-          setStampImageState(loadedStamp);
-          lastSyncedRef.current.stampImage = loadedStamp;
         }
       } catch (error) {
         console.error('Failed to fetch settings from backend:', error);
@@ -139,6 +141,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('nextActNumber', nextActNumber.toString());
       
       if (nextActNumber !== lastSyncedRef.current.nextActNumber) {
+        console.log('Syncing nextActNumber to backend:', nextActNumber);
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -158,6 +161,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('specification', specJson);
       
       if (specJson !== lastSyncedRef.current.specification) {
+        console.log('Syncing specification to backend:', specification.length, 'items');
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -180,6 +184,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
       }
       
       if (signatureImage !== lastSyncedRef.current.signatureImage) {
+        console.log('Syncing signatureImage to backend');
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -202,6 +207,7 @@ export function ActProvider({ children }: { children: ReactNode }) {
       }
       
       if (stampImage !== lastSyncedRef.current.stampImage) {
+        console.log('Syncing stampImage to backend');
         fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
