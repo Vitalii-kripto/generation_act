@@ -22,6 +22,52 @@ function AppContent() {
   const [editingAct, setEditingAct] = useState<Act | null>(null);
   const { updateAct } = useActContext();
 
+  const confirmAndSaveProfitIfNeeded = async (): Promise<boolean> => {
+    const guard = (window as any).__profitRegistrySaveGuard;
+
+    if (!guard || typeof guard.hasUnsavedChanges !== 'function') {
+      return true;
+    }
+
+    if (!guard.hasUnsavedChanges()) {
+      return true;
+    }
+
+    const shouldSave = window.confirm(
+      'Во вкладке «Прибыль» есть несохранённые изменения. Сохранить их перед переходом?'
+    );
+
+    if (!shouldSave) {
+      return false;
+    }
+
+    try {
+      if (typeof guard.saveNow === 'function') {
+        await guard.saveNow();
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to save profit data before tab switch:', error);
+      alert('Не удалось сохранить данные вкладки «Прибыль». Переход отменён.');
+      return false;
+    }
+  };
+
+  const handleTabChange = async (
+    nextTab: 'create' | 'registry' | 'updRegistry' | 'profit' | 'settings'
+  ) => {
+    if (activeTab === 'profit' && nextTab !== 'profit') {
+      const ok = await confirmAndSaveProfitIfNeeded();
+      if (!ok) return;
+    }
+
+    if (nextTab !== 'create') {
+      setEditingAct(null);
+    }
+
+    setActiveTab(nextTab);
+  };
+
   if (viewingAct) {
     return <ActPrintView act={viewingAct} onBack={() => setViewingAct(null)} />;
   }
@@ -43,10 +89,7 @@ function AppContent() {
           <div className="border-b border-gray-200">
             <nav className="-mb-px flex space-x-8 px-6 overflow-x-auto" aria-label="Tabs">
               <button
-                onClick={() => {
-                  setActiveTab('create');
-                  setEditingAct(null);
-                }}
+                onClick={() => void handleTabChange('create')}
                 className={`${
                   activeTab === 'create' && !editingAct
                     ? 'border-blue-500 text-blue-600'
@@ -59,7 +102,7 @@ function AppContent() {
 
               {editingAct && (
                 <button
-                  onClick={() => setActiveTab('create')}
+                  onClick={() => void handleTabChange('create')}
                   className="border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center"
                 >
                   <FileText className="w-5 h-5 mr-2" />
@@ -68,10 +111,7 @@ function AppContent() {
               )}
 
               <button
-                onClick={() => {
-                  setActiveTab('registry');
-                  setEditingAct(null);
-                }}
+                onClick={() => void handleTabChange('registry')}
                 className={`${
                   activeTab === 'registry'
                     ? 'border-blue-500 text-blue-600'
@@ -83,10 +123,7 @@ function AppContent() {
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('updRegistry');
-                  setEditingAct(null);
-                }}
+                onClick={() => void handleTabChange('updRegistry')}
                 className={`${
                   activeTab === 'updRegistry'
                     ? 'border-blue-500 text-blue-600'
@@ -98,10 +135,7 @@ function AppContent() {
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('profit');
-                  setEditingAct(null);
-                }}
+                onClick={() => void handleTabChange('profit')}
                 className={`${
                   activeTab === 'profit'
                     ? 'border-blue-500 text-blue-600'
@@ -113,10 +147,7 @@ function AppContent() {
               </button>
 
               <button
-                onClick={() => {
-                  setActiveTab('settings');
-                  setEditingAct(null);
-                }}
+                onClick={() => void handleTabChange('settings')}
                 className={`${
                   activeTab === 'settings'
                     ? 'border-blue-500 text-blue-600'
