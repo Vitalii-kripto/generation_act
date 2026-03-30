@@ -25,6 +25,20 @@ export default defineConfig(({ mode }) => {
       host: frontendHost,
       port: frontendPort,
       strictPort: false,
+      watch: {
+        ignored: [
+          '**/.idea/**',
+          '**/logs/**',
+          '**/*.log',
+          '**/app.log',
+          '**/python_output.txt',
+          '**/acts.db',
+          '**/acts.db-shm',
+          '**/acts.db-wal',
+          '**/__pycache__/**',
+          '**/*.tmp'
+        ]
+      },
       proxy: {
         '/api': {
           target: backendUrl,

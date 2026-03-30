@@ -70,7 +70,20 @@ function isRetryableGeminiError(error: unknown): boolean {
   );
 }
 
+function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  const text = error instanceof Error ? error.message : typeof error === "string" ? error : JSON.stringify(error);
+  return (
+    text.includes('Failed to fetch') ||
+    text.includes('fetch cancelled') ||
+    text.includes('network error') ||
+    text.includes('aborted') ||
+    text.includes('interrupted')
+  );
+}
+
 function getReadableError(error: unknown): string {
+  if (isAbortError(error)) return "Запрос прерван (возможно, страница была перезагружена или закрыта)";
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   try {
@@ -218,6 +231,15 @@ async function generateWithRetryAndFallback(
     } catch (e) {
       lastError = e;
 
+      if (isAbortError(e)) {
+        await sendClientLog("error", "Запрос прерван (Abort/Network Error)", {
+          model: PRIMARY_MODEL,
+          action,
+          error: getReadableError(e)
+        });
+        throw new Error(getReadableError(e));
+      }
+
       const retryable = isRetryableGeminiError(e);
 
       await sendClientLog(retryable ? "warning" : "error", "Ошибка основной модели Gemini", {
@@ -282,6 +304,15 @@ async function generateWithRetryAndFallback(
       return { response, modelUsed: FALLBACK_MODEL };
     } catch (e) {
       lastError = e;
+
+      if (isAbortError(e)) {
+        await sendClientLog("error", "Запрос прерван (Abort/Network Error)", {
+          model: FALLBACK_MODEL,
+          action,
+          error: getReadableError(e)
+        });
+        throw new Error(getReadableError(e));
+      }
 
       await sendClientLog("error", "Ошибка резервной модели Gemini", {
         model: FALLBACK_MODEL,

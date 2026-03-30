@@ -46,6 +46,13 @@ export function UpdRegistry() {
 
   const [uploadProgress, setUploadProgress] = useState<{ current: number, total: number, status: string } | null>(null);
   const [uploadResults, setUploadResults] = useState<{ success: number, failed: string[] } | null>(null);
+  const isMounted = useRef(true);
+
+  React.useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -60,11 +67,18 @@ export function UpdRegistry() {
 
     try {
       for (let i = 0; i < files.length; i++) {
+        if (!isMounted.current) {
+          console.warn('Компонент размонтирован, прерываем загрузку.');
+          break;
+        }
+
         const file = files[i];
         setUploadProgress({ current: i + 1, total: files.length, status: `Обработка: ${file.name}` });
         
         // Delay to avoid rate limits (1 second between files)
         if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
+
+        if (!isMounted.current) break;
 
         try {
           const base64String = await new Promise<string>((resolve, reject) => {
@@ -74,14 +88,27 @@ export function UpdRegistry() {
             reader.readAsDataURL(file);
           });
           
+          if (!isMounted.current) break;
+
           // Retry logic for AI extraction
           let data = null;
           let retries = 2;
+          let lastError: any = null;
+          
           while (retries >= 0) {
+            if (!isMounted.current) break;
             try {
               data = await extractDataFromUPD(base64String, file.type);
               break;
-            } catch (err) {
+            } catch (err: any) {
+              lastError = err;
+              const errMsg = err instanceof Error ? err.message : String(err);
+              
+              // Если это ошибка прерывания (AbortError/Network), не делаем retry
+              if (errMsg.includes('прерван') || errMsg.includes('aborted') || errMsg.includes('Failed to fetch')) {
+                throw err;
+              }
+
               if (retries === 0) throw err;
               retries--;
               setUploadProgress(prev => prev ? { ...prev, status: `Повтор (${2-retries}/2): ${file.name}` } : null);
@@ -89,7 +116,8 @@ export function UpdRegistry() {
             }
           }
 
-          if (!data) throw new Error("Не удалось извлечь данные");
+          if (!isMounted.current) break;
+          if (!data) throw new Error(lastError ? (lastError instanceof Error ? lastError.message : String(lastError)) : "Не удалось извлечь данные");
           
           // Проверка покупателя
           const customerName = (data.customerName || '').toLowerCase();
@@ -136,6 +164,7 @@ export function UpdRegistry() {
           } catch (err: any) {
             if (err.message.includes('уже существует')) {
               const overwrite = await customConfirm(`УПД №${updToSave.updNumber} от ${updToSave.updDate} уже существует. Перезаписать?`);
+              if (!isMounted.current) break;
               if (overwrite) {
                 const oldUpd = upds.find(u => u.updNumber === updToSave.updNumber && u.updDate === updToSave.updDate);
                 const createdUpd = await createUpd(updToSave, true);
@@ -160,14 +189,18 @@ export function UpdRegistry() {
         }
       }
 
-      setUploadResults({ success: successCount, failed });
+      if (isMounted.current) {
+        setUploadResults({ success: successCount, failed });
+      }
     } catch (err) {
       console.error("Critical upload error:", err);
     } finally {
-      setIsExtracting(false);
-      setUploadProgress(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (isMounted.current) {
+        setIsExtracting(false);
+        setUploadProgress(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
       }
     }
   };
