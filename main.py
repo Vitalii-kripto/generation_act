@@ -13,9 +13,10 @@ from docx import Document
 from docx.shared import Pt, Inches, RGBColor, Mm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.oxml import parse_xml
+from docx.oxml import parse_xml, OxmlElement
 from io import BytesIO
 import uuid
+from copy import deepcopy
 from datetime import datetime, timedelta
 import holidays
 import openpyxl
@@ -1200,66 +1201,116 @@ def num_to_words_ru(n: float) -> str:
     res_str = " ".join(p for p in parts if p).strip()
     return f"{res_str.capitalize()} {kop:02d} копеек"
 
-# Константы для вставки печати и подписи в DOCX
-STAMP_WIDTH_MM = 40
-SIGNATURE_WIDTH_MM = 35
-STAMP_X_OFFSET_MM = 10
-STAMP_Y_OFFSET_MM = -15
-SIGNATURE_X_OFFSET_MM = 5
-SIGNATURE_Y_OFFSET_MM = -10
+# =========================
+# НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ
+# =========================
 
-def add_floating_image(paragraph, image_bytes, width_mm, x_offset_mm, y_offset_mm):
-    """
-    Вставляет плавающее изображение в параграф Word в режиме 'за текстом'.
-    """
+STAMP_WIDTH_MM = 45.0
+SIGNATURE_WIDTH_MM = 60.0
+
+# Тонкая подстройка положения в блоке Поставщика
+# Координаты задаются относительно абзаца со строкой подписи
+STAMP_OFFSET_X_MM = 33.0
+STAMP_OFFSET_Y_MM = -2.0
+
+SIGNATURE_OFFSET_X_MM = 6.0
+SIGNATURE_OFFSET_Y_MM = -10.0
+
+
+def mm_to_emu(mm: float) -> int:
+    return int(mm * 36000)
+
+
+def build_anchor_from_inline(inline, x_emu: int, y_emu: int, behind_doc: bool = True):
+    anchor = OxmlElement("wp:anchor")
+    anchor.set("distT", "0")
+    anchor.set("distB", "0")
+    anchor.set("distL", "0")
+    anchor.set("distR", "0")
+    anchor.set("simplePos", "0")
+    anchor.set("relativeHeight", "251659264")
+    anchor.set("behindDoc", "1" if behind_doc else "0")
+    anchor.set("locked", "0")
+    anchor.set("layoutInCell", "1")
+    anchor.set("allowOverlap", "1")
+
+    simple_pos = OxmlElement("wp:simplePos")
+    simple_pos.set("x", "0")
+    simple_pos.set("y", "0")
+    anchor.append(simple_pos)
+
+    position_h = OxmlElement("wp:positionH")
+    position_h.set("relativeFrom", "column")
+    pos_offset_h = OxmlElement("wp:posOffset")
+    pos_offset_h.text = str(x_emu)
+    position_h.append(pos_offset_h)
+    anchor.append(position_h)
+
+    position_v = OxmlElement("wp:positionV")
+    position_v.set("relativeFrom", "paragraph")
+    pos_offset_v = OxmlElement("wp:posOffset")
+    pos_offset_v.text = str(y_emu)
+    position_v.append(pos_offset_v)
+    anchor.append(position_v)
+
+    extent = inline.xpath("./wp:extent")[0]
+    anchor.append(deepcopy(extent))
+
+    effect_extents = inline.xpath("./wp:effectExtent")
+    if effect_extents:
+        anchor.append(deepcopy(effect_extents[0]))
+    else:
+        effect = OxmlElement("wp:effectExtent")
+        effect.set("l", "0")
+        effect.set("t", "0")
+        effect.set("r", "0")
+        effect.set("b", "0")
+        anchor.append(effect)
+
+    wrap_none = OxmlElement("wp:wrapNone")
+    anchor.append(wrap_none)
+
+    doc_pr = inline.xpath("./wp:docPr")[0]
+    anchor.append(deepcopy(doc_pr))
+
+    c_nv = inline.xpath("./wp:cNvGraphicFramePr")
+    if c_nv:
+        anchor.append(deepcopy(c_nv[0]))
+
+    graphic = inline.xpath("./a:graphic")[0]
+    anchor.append(deepcopy(graphic))
+
+    return anchor
+
+
+def add_floating_picture_behind_text(
+    paragraph,
+    image_bytes: bytes,
+    width_mm: float,
+    x_offset_mm: float,
+    y_offset_mm: float,
+    height_mm: float | None = None,
+):
     run = paragraph.add_run()
-    img = run.add_picture(image_bytes)
-    
-    # Получаем размеры в EMU
-    width_emu = int(Mm(width_mm))
-    # Сохраняем пропорции
-    orig_width = img.width
-    orig_height = img.height
-    height_emu = int(width_emu * orig_height / orig_width)
-    
-    img.width = width_emu
-    img.height = height_emu
+    image_stream = BytesIO(image_bytes)
 
-    # XML для превращения inline в anchor (плавающее)
-    # Смещение задается в EMU
-    x_offset_emu = int(Mm(x_offset_mm))
-    y_offset_emu = int(Mm(y_offset_mm))
+    if height_mm is not None:
+        run.add_picture(image_stream, width=Mm(width_mm), height=Mm(height_mm))
+    else:
+        run.add_picture(image_stream, width=Mm(width_mm))
 
-    # Находим элемент wp:inline
-    inline = img._inline
-    
-    # Создаем wp:anchor на основе wp:inline
-    # behindDoc="1" означает "за текстом"
-    anchor_xml = f'''<wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="251658240" backend="0" locked="0" layoutInCell="1" allowOverlap="1" behindDoc="1" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
-        <wp:simplePos x="0" y="0"/>
-        <wp:positionH relativeFrom="column">
-            <wp:posOffset>{x_offset_emu}</wp:posOffset>
-        </wp:positionH>
-        <wp:positionV relativeFrom="paragraph">
-            <wp:posOffset>{y_offset_emu}</wp:posOffset>
-        </wp:positionV>
-        <wp:extent cx="{width_emu}" cy="{height_emu}"/>
-        <wp:effectExtent l="0" t="0" r="0" b="0"/>
-        <wp:wrapNone/>
-        <wp:docPr id="{uuid.uuid4().int & 0x7FFFFFFF}" name="Picture"/>
-        <wp:cNvGraphicFramePr>
-            <a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>
-        </wp:cNvGraphicFramePr>
-    </wp:anchor>'''
-    
-    anchor = parse_xml(anchor_xml)
-    
-    # Копируем графический объект из inline в anchor
-    graphic = inline.xpath('a:graphic', namespaces=inline.nsmap)[0]
-    anchor.append(graphic)
-    
-    # Заменяем inline на anchor в родительском элементе
-    inline.getparent().replace(inline, anchor)
+    drawing = run._r.xpath("./w:drawing")[0]
+    inline = drawing.xpath("./wp:inline")[0]
+
+    anchor = build_anchor_from_inline(
+        inline=inline,
+        x_emu=mm_to_emu(x_offset_mm),
+        y_emu=mm_to_emu(y_offset_mm),
+        behind_doc=True,
+    )
+
+    drawing.remove(inline)
+    drawing.append(anchor)
 
 @app.post("/api/generate-docx")
 async def generate_docx_from_data(act_data: Act):
@@ -1443,43 +1494,45 @@ async def generate_docx_from_data(act_data: Act):
         p_supp = cells[1].paragraphs[0]
         p_supp.add_run(f"{act['supplierName']} ({act['supplierShortName']})\n\n")
         
-        p_supp_name = cells[1].add_paragraph()
-        p_supp_name.add_run("_________________")
-        p_supp_name.add_run(f" / {act['supplierRepShort']} /\n")
-        p_supp_name.add_run("М.П.")
-        
-        # Вставка подписи и печати если есть
+        # Подпись и печать Поставщика: плавающие изображения "за текстом"
         has_sig = bool(act.get('signatureImage'))
         has_stamp = bool(act.get('stampImage'))
 
-        if has_stamp or has_sig:
-            # Используем p_supp_name как контекст для вставки плавающих изображений
-            # Они будут позиционироваться относительно этого параграфа
-            if has_stamp:
-                try:
-                    b64 = act['stampImage'].split("base64,")[1] if "base64," in act['stampImage'] else act['stampImage']
-                    add_floating_image(
-                        p_supp_name, 
-                        BytesIO(base64.b64decode(b64)), 
-                        width_mm=STAMP_WIDTH_MM, 
-                        x_offset_mm=STAMP_X_OFFSET_MM, 
-                        y_offset_mm=STAMP_Y_OFFSET_MM
-                    )
-                except Exception as e:
-                    logger.error(f"Error adding stamp to docx: {e}")
-                    
-            if has_sig:
-                try:
-                    b64 = act['signatureImage'].split("base64,")[1] if "base64," in act['signatureImage'] else act['signatureImage']
-                    add_floating_image(
-                        p_supp_name, 
-                        BytesIO(base64.b64decode(b64)), 
-                        width_mm=SIGNATURE_WIDTH_MM, 
-                        x_offset_mm=SIGNATURE_X_OFFSET_MM, 
-                        y_offset_mm=SIGNATURE_Y_OFFSET_MM
-                    )
-                except Exception as e:
-                    logger.error(f"Error adding signature to docx: {e}")
+        p_supp_name = cells[1].add_paragraph()
+        p_supp_name.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p_supp_name.add_run("_________________")
+        p_supp_name.add_run(f" / {act['supplierRepShort']} /\n")
+        p_supp_name.add_run("М.П.")
+
+        if has_stamp:
+            try:
+                stamp_b64 = act['stampImage'].split("base64,")[1] if "base64," in act['stampImage'] else act['stampImage']
+                stamp_bytes = base64.b64decode(stamp_b64)
+
+                add_floating_picture_behind_text(
+                    paragraph=p_supp_name,
+                    image_bytes=stamp_bytes,
+                    width_mm=STAMP_WIDTH_MM,
+                    x_offset_mm=STAMP_OFFSET_X_MM,
+                    y_offset_mm=STAMP_OFFSET_Y_MM,
+                )
+            except Exception as e:
+                logger.error(f"Error adding floating stamp to docx: {e}", exc_info=True)
+
+        if has_sig:
+            try:
+                sign_b64 = act['signatureImage'].split("base64,")[1] if "base64," in act['signatureImage'] else act['signatureImage']
+                sign_bytes = base64.b64decode(sign_b64)
+
+                add_floating_picture_behind_text(
+                    paragraph=p_supp_name,
+                    image_bytes=sign_bytes,
+                    width_mm=SIGNATURE_WIDTH_MM,
+                    x_offset_mm=SIGNATURE_OFFSET_X_MM,
+                    y_offset_mm=SIGNATURE_OFFSET_Y_MM,
+                )
+            except Exception as e:
+                logger.error(f"Error adding floating signature to docx: {e}", exc_info=True)
 
         target_stream = BytesIO()
         doc.save(target_stream)
