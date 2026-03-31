@@ -107,7 +107,7 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
     return strict ? null : { ...item, specNumber: '', priceMismatch: false };
   };
 
-  const [act, setAct] = useState<Act>(initialAct || {
+  const createDefaultAct = (): Act => ({
     id: crypto.randomUUID(),
     actNumber: nextActNumber,
     actDate: new Date().toLocaleDateString('ru-RU'),
@@ -145,6 +145,28 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
     expertise: '',
     penalty: 'Неустойка Поставщику не начисляется.'
   });
+
+  const [act, setAct] = useState<Act>(initialAct || createDefaultAct());
+
+  useEffect(() => {
+    if (initialAct) {
+      setAct(initialAct);
+      return;
+    }
+
+    setAct((prev) => {
+      const isProbablyNewDefault =
+        !prev ||
+        !prev.id ||
+        prev.items.length === 0;
+
+      if (isProbablyNewDefault) {
+        return createDefaultAct();
+      }
+
+      return prev;
+    });
+  }, [initialAct, nextActNumber]);
 
   // Re-evaluate specification matches when specification changes
   useEffect(() => {
@@ -701,7 +723,9 @@ export function CreateAct({ onCreated, initialAct, onUpdate }: { onCreated?: (ac
       )}
 
       <div className="bg-blue-50 p-6 rounded-lg border border-blue-100 flex flex-col items-center justify-center text-center">
-        <h3 className="text-lg font-medium text-blue-900 mb-2">{initialAct ? 'Обновление данных из УПД' : 'Автоматическое заполнение из нескольких УПД'}</h3>
+        <h3 className="text-lg font-medium text-blue-900 mb-2">
+          {initialAct ? 'Редактирование существующего акта' : 'Автоматическое заполнение из нескольких УПД'}
+        </h3>
         <p className="text-sm text-blue-700 mb-4 max-w-md">Выберите один или несколько файлов УПД (PDF или изображения). Мы объединим все товары в один акт.</p>
         <input 
           type="file" 

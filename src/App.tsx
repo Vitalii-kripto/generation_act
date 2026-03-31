@@ -164,9 +164,13 @@ function AppContent() {
         <main className="relative">
           <div className={getTabContainerClass('create')} aria-hidden={activeTab !== 'create'}>
             {!editingAct ? (
-              <CreateAct onCreated={(act) => setViewingAct(act)} />
+              <CreateAct
+                key="create-new-act"
+                onCreated={(act) => setViewingAct(act)}
+              />
             ) : (
               <CreateAct
+                key={`edit-act-${editingAct.id}`}
                 initialAct={editingAct}
                 onUpdate={(act) => {
                   updateAct(act.id, act);
